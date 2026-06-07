@@ -1,0 +1,586 @@
+Yes. **End-to-end, this mechanism is doable.** The clean version is:
+
+```text
+Local project / local side app
+        ↓
+Codex edits code locally
+        ↓
+Git stores code
+        ↓
+clasp syncs Apps Script code to Google
+        ↓
+Apps Script runs behind the target Google Sheet
+        ↓
+Apps Script reads/writes the Sheet + calls APIs
+        ↓
+Sheet stores the data/results/logs
+```
+
+That is the system. Not magic. Just many moving parts pretending to be one machine, because apparently one spreadsheet was not enough suffering. 🧾
+
+---
+
+# 1. What each part does
+
+| Part               | Purpose                                                 |
+| ------------------ | ------------------------------------------------------- |
+| **Local project**  | Your main codebase on your PC                           |
+| **Codex**          | Edits/builds the code in that local folder              |
+| **Git**            | Tracks versions and changes                             |
+| **clasp**          | Pushes local Apps Script files into Google Apps Script  |
+| **Google Sheet**   | Stores config, raw data, normalized data, logs, reports |
+| **Apps Script**    | Backend processor/API behind the sheet                  |
+| **External APIs**  | Zendesk, WFM, AI, whatever else later                   |
+| **Local side app** | Optional control panel to manage/sync/run projects      |
+
+Google’s `clasp` is the official CLI route for local Apps Script development, including pushing, pulling, versioning, and deployments from your terminal. ([Google for Developers][1])
+
+---
+
+# 2. What you need
+
+## Local machine
+
+You need:
+
+```text
+Node.js
+npm
+Git
+clasp
+Codex CLI or Codex agent access
+Google login for clasp
+A local project folder
+```
+
+Codex CLI can run locally from your terminal and read/change/run code inside the selected directory, so it fits this workflow properly. ([OpenAI Developers][2])
+
+---
+
+## Google side
+
+For each reporting project, you need:
+
+```text
+Google Sheet ID
+Apps Script Project ID
+Apps Script Web App URL, optional
+Google Drive Folder ID, optional
+Apps Script deployment ID, optional
+```
+
+The two most important are:
+
+```text
+spreadsheetId
+scriptId
+```
+
+Because:
+
+| ID              | Used for                                                |
+| --------------- | ------------------------------------------------------- |
+| `spreadsheetId` | Apps Script knows which sheet to read/write             |
+| `scriptId`      | clasp knows which Apps Script project to push code into |
+
+---
+
+# 3. Local folder structure
+
+Use this kind of structure:
+
+```text
+reporting-system/
+│
+├─ apps-script/
+│  ├─ appsscript.json
+│  ├─ Code.js
+│  ├─ Config.js
+│  ├─ Sheets.js
+│  ├─ ApiRouter.js
+│  ├─ ZendeskApi.js
+│  ├─ WfmApi.js
+│  ├─ Reports.js
+│  ├─ Scheduler.js
+│  └─ Logger.js
+│
+├─ local-control-app/
+│  ├─ package.json
+│  └─ src/
+│
+├─ projects.json
+├─ package.json
+├─ .gitignore
+└─ README.md
+```
+
+Your `projects.json` could look like this:
+
+```json
+{
+  "projects": [
+    {
+      "key": "bmrx-reporting",
+      "name": "BMRX Reporting",
+      "spreadsheetId": "GOOGLE_SHEET_ID_HERE",
+      "scriptId": "APPS_SCRIPT_ID_HERE",
+      "driveFolderId": "GOOGLE_DRIVE_FOLDER_ID_HERE",
+      "webAppUrl": "APPS_SCRIPT_WEB_APP_URL_HERE",
+      "environment": "production"
+    }
+  ]
+}
+```
+
+---
+
+# 4. How the sync works
+
+Inside the Apps Script folder, clasp uses a file like this:
+
+```json
+{
+  "scriptId": "APPS_SCRIPT_ID_HERE",
+  "rootDir": "./apps-script"
+}
+```
+
+Then your local command does:
+
+```bash
+clasp push
+```
+
+That pushes your local Apps Script files into the Google Apps Script project.
+
+Then:
+
+```bash
+clasp deploy
+```
+
+That deploys a new version.
+
+So your workflow becomes:
+
+```text
+Codex changes local code
+        ↓
+You review/test
+        ↓
+Git commit
+        ↓
+Run sync command
+        ↓
+clasp pushes to Apps Script
+        ↓
+Apps Script now has the updated backend code
+```
+
+That is exactly the proper pattern. Annoyingly practical.
+
+---
+
+# 5. Runtime flow
+
+Once the code is deployed, Apps Script becomes the actual backend.
+
+```text
+Apps Script
+    ↓
+Reads project config
+    ↓
+Opens target Google Sheet by spreadsheetId
+    ↓
+Reads Agent Directory / Config / Calendar
+    ↓
+Calls external APIs
+    ↓
+Writes raw data to sheet
+    ↓
+Normalizes data
+    ↓
+Generates reports
+    ↓
+Writes logs
+```
+
+Apps Script can expose web endpoints using `doGet(e)` and `doPost(e)`, and can return text/JSON-style responses through `ContentService`. ([Google for Developers][3])
+
+So the local side app can call Apps Script like:
+
+```text
+POST /exec
+{
+  "action": "runDailyReport",
+  "projectKey": "bmrx-reporting"
+}
+```
+
+Apps Script receives it and runs the correct backend job.
+
+---
+
+# 6. Local side app role
+
+Your local side app is not the production backend.
+
+It is your **developer/control tool**.
+
+It can do things like:
+
+| Local side app function    | What it does                            |
+| -------------------------- | --------------------------------------- |
+| Create project config      | Stores sheet ID, script ID, folder ID   |
+| Generate Apps Script files | Creates code files from templates       |
+| Run `clasp push`           | Syncs local code to Apps Script         |
+| Run `clasp deploy`         | Creates new Apps Script deployment      |
+| Call Apps Script web app   | Manually trigger jobs                   |
+| Open project links         | Sheet, Apps Script editor, Drive folder |
+| Validate setup             | Checks required config exists           |
+
+So your local app could have buttons like:
+
+```text
+Sync Apps Script
+Deploy Apps Script
+Run Daily Report
+Run Weekly Report
+Open Google Sheet
+Open Apps Script
+Check Config
+```
+
+That is fine.
+
+---
+
+# 7. The important separation
+
+Do **not** confuse these three jobs:
+
+| Job                    | Handled by       |
+| ---------------------- | ---------------- |
+| Writing code           | Codex/local repo |
+| Deploying code         | clasp            |
+| Running business logic | Apps Script      |
+
+Codex writes the code.
+
+clasp pushes the code.
+
+Apps Script runs the code.
+
+The sheet stores the data.
+
+That is the clean mental model.
+
+---
+
+# 8. Secret handling
+
+Do not put API keys inside:
+
+```text
+Google Sheet
+Git repo
+projects.json
+frontend code
+```
+
+Store secrets in Apps Script Properties.
+
+Apps Script Properties Service stores key-value pairs scoped to a script, user, or document, and is meant for configuration/preferences. ([Google for Developers][4])
+
+Store things like:
+
+```text
+ZENDESK_API_TOKEN
+WFM_API_KEY
+AI_API_KEY
+INTERNAL_API_SECRET
+```
+
+Your local project can store non-secret IDs:
+
+```text
+spreadsheetId
+scriptId
+driveFolderId
+webAppUrl
+```
+
+---
+
+# 9. Full end-to-end process
+
+## Step 1: Create local repo
+
+```text
+Create local folder
+Initialize Git
+Install clasp
+Add Apps Script source files
+Add project config file
+```
+
+---
+
+## Step 2: Create Google Sheet
+
+Create a blank Google Sheet.
+
+Add basic tabs:
+
+```text
+Config
+Agent Directory
+Raw Data
+Normalized Data
+Reports
+Run Log
+Error Log
+```
+
+Copy the Sheet ID.
+
+---
+
+## Step 3: Create Apps Script project
+
+Create an Apps Script project linked to that sheet or standalone.
+
+Copy the Script ID.
+
+Apps Script supports both standalone and container-bound projects. Container-bound means attached to a Google Sheet, Doc, Form, or Slide. ([Google for Developers][5])
+
+For your case, I would use:
+
+```text
+One reporting sheet = one bound Apps Script project
+```
+
+Cleaner for management.
+
+---
+
+## Step 4: Link local project to Apps Script
+
+Create `.clasp.json` with the correct `scriptId`.
+
+Then run:
+
+```bash
+clasp push
+```
+
+Your local code now exists inside Google Apps Script.
+
+---
+
+## Step 5: Set secrets
+
+Inside Apps Script Properties, add:
+
+```text
+ZENDESK_API_TOKEN
+WFM_API_KEY
+AI_API_KEY
+INTERNAL_API_SECRET
+SPREADSHEET_ID
+```
+
+You can also put `SPREADSHEET_ID` in code config, but for reusable code, properties are cleaner.
+
+---
+
+## Step 6: Deploy Apps Script
+
+Deploy as a web app if you need external/local calls.
+
+Apps Script web apps need `doGet(e)` or `doPost(e)` entry points to respond to browser or program requests. ([Google for Developers][3])
+
+Then your local app can call it.
+
+---
+
+## Step 7: Apps Script creates/validates sheets
+
+The first backend function should be:
+
+```text
+setupProject()
+```
+
+It should:
+
+```text
+Check required tabs exist
+Create missing tabs
+Add headers
+Add default config
+Add run log
+Add error log
+```
+
+So Codex/local does not manually create every tab. The script can bootstrap the sheet.
+
+---
+
+## Step 8: Apps Script runs background jobs
+
+Apps Script handles:
+
+```text
+Pull Zendesk data
+Pull WFM data
+Read attendance
+Normalize rows
+Generate reports
+Write logs
+Send emails
+```
+
+Scheduled triggers can run background jobs. Apps Script supports triggers such as `onOpen`, `onEdit`, `doGet`, and `doPost`; installable/time-based triggers are used for scheduled automation. ([Google for Developers][6])
+
+---
+
+## Step 9: Local side app controls it
+
+Your local app can call:
+
+```text
+runSetup
+runDailyPull
+runWeeklyReport
+runMonthlyReport
+getLogs
+getErrors
+```
+
+But it should not do the heavy production work itself.
+
+Production work stays inside Apps Script.
+
+---
+
+# 10. Interaction map
+
+```text
+[Codex]
+  edits
+    ↓
+[Local Files]
+  committed to
+    ↓
+[Git]
+  synced by
+    ↓
+[clasp]
+  pushes to
+    ↓
+[Apps Script Project]
+  reads/writes
+    ↓
+[Google Sheet]
+  stores
+    ↓
+[Raw Data / Reports / Logs]
+```
+
+Runtime:
+
+```text
+[Apps Script Trigger]
+  starts job
+    ↓
+[Apps Script API modules]
+  call
+    ↓
+[Zendesk / WFM / AI APIs]
+  return data
+    ↓
+[Apps Script Normalizer]
+  writes
+    ↓
+[Google Sheet]
+```
+
+Manual local control:
+
+```text
+[Local Side App]
+  calls
+    ↓
+[Apps Script Web App URL]
+  runs
+    ↓
+[Backend Function]
+  updates
+    ↓
+[Google Sheet]
+```
+
+---
+
+# 11. Best design decision
+
+Use this pattern:
+
+```text
+One project config
+One spreadsheet
+One Apps Script project
+One deployment
+One local codebase template
+```
+
+For each new client/project:
+
+```text
+Copy template
+Create sheet
+Create Apps Script project
+Set IDs
+Run setup
+Push code
+Deploy
+Test
+```
+
+Same engine, different config.
+
+---
+
+# 12. Final answer
+
+Yes, your idea works.
+
+The correct mechanism is:
+
+```text
+Local Codex-managed repo
+    → Git version control
+    → clasp sync/deploy
+    → Apps Script backend
+    → Google Sheet storage
+    → Apps Script triggers/web API
+    → External APIs + reports
+```
+
+The local app is your **developer/control panel**.
+
+Apps Script is your **backend runtime**.
+
+Google Sheets is your **data store**.
+
+Git is your **source of truth for code**.
+
+That is the full pattern. Keep the code in Git, keep secrets in Apps Script Properties, keep the data in Sheets, and use clasp as the bridge.
+
+[1]: https://developers.google.com/apps-script/guides/clasp?utm_source=chatgpt.com "Use the command-line interface with clasp | Apps Script"
+[2]: https://developers.openai.com/codex/cli?utm_source=chatgpt.com "Codex CLI"
+[3]: https://developers.google.com/apps-script/guides/web?utm_source=chatgpt.com "Web Apps | Apps Script"
+[4]: https://developers.google.com/apps-script/guides/properties?utm_source=chatgpt.com "Properties Service | Apps Script"
+[5]: https://developers.google.com/apps-script/guides/projects?utm_source=chatgpt.com "Script Projects | Apps Script"
+[6]: https://developers.google.com/apps-script/guides/triggers?utm_source=chatgpt.com "Simple Triggers | Apps Script"

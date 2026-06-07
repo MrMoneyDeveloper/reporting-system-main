@@ -1,0 +1,14 @@
+{
+  "projects": [
+    {
+      "key": "bmrx-reporting",
+      "name": "BMRX Productivity Reporting Engine",
+      "spreadsheetId": "GOOGLE_SHEET_ID_HERE",
+      "attendanceSpreadsheetId": "ATTENDANCE_GOOGLE_SHEET_ID_HERE",
+      "scriptId": "APPS_SCRIPT_ID_HERE",
+      "driveFolderId": "GOOGLE_DRIVE_FOLDER_ID_HERE",
+      "webAppUrl": "APPS_SCRIPT_WEB_APP_URL_HERE",
+      "environment": "production"
+    }
+  ]
+}

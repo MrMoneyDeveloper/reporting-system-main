@@ -1,0 +1,14 @@
+.clasp.json
+.clasp.backup*.json
+projects.json
+.env
+.env.*
+node_modules/
+dist/
+build/
+coverage/
+.DS_Store
+Thumbs.db
+*.log
+tmp/
+temp/

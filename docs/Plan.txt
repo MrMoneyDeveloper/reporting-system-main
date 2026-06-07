@@ -1,0 +1,1368 @@
+## GAC Plan: Automated Ticket Summary + Productivity Reporting System
+
+Your whiteboard is basically saying: **stop letting humans manually update things**, because apparently we enjoy building business processes on top of “please remember to send me this.” Tragic. 🧾
+
+The correct build order is:
+
+> **1. Google Sheet data engine first**
+> **2. Automated Excel + email reporting second**
+> **3. AI summary layer third**
+> **4. Cloudflare site last**
+
+The site is useless until the data pipeline is clean. Otherwise, you are just building a fancy window into garbage. Very modern, very corporate.
+
+---
+
+# 1. Final System Goal
+
+You want one system that can:
+
+| Area             | Purpose                                           |
+| ---------------- | ------------------------------------------------- |
+| Attendance       | Track who worked, when, and which shift           |
+| Zendesk Tickets  | Pull actual ticket output by agent                |
+| WFM Productivity | Pull logged productive/unproductive time          |
+| Normalization    | Clean all raw data into one standard structure    |
+| Reporting        | Generate daily, weekly, and monthly Excel reports |
+| AI Summary       | Summarize performance for management              |
+| Email            | Send summary + Excel automatically                |
+| Site             | Allow users to view/download reports later        |
+
+The system must support:
+
+* **Daily reports**
+* **Weekly reports**
+* **Monthly reports**
+* **Fiscal year logic**
+* **Shift cutoffs**
+* **Agent email mapping**
+* **Enable/disable report schedules**
+* **Manual reruns**
+* **Audit logs**
+* **Error logs**
+* **Generated Excel files**
+* **Email delivery**
+* **Future web dashboard**
+
+---
+
+# 2. Main Architecture
+
+```text
+Attendance Sheet
+        |
+        v
+Google Sheets Master Workbook
+        |
+        |---- Agent Directory
+        |---- Fiscal Calendar
+        |---- Config
+        |---- Raw Zendesk Tickets
+        |---- Raw WFM
+        |---- Raw Attendance
+        |---- Normalized Attendance
+        |---- Normalized Ticket Productivity
+        |---- Normalized WFM Productivity
+        |---- Final Report Dataset
+        |
+        v
+Apps Script Engine
+        |
+        |---- Pull Zendesk Tickets API
+        |---- Pull WFM API
+        |---- Normalize Data
+        |---- Generate Excel Report
+        |---- Create AI Summary
+        |---- Email Management
+        |
+        v
+Google Drive Report Folder
+        |
+        v
+Email + Future Cloudflare Site
+```
+
+---
+
+# 3. Key Principle
+
+Do **not** hardcode people in Apps Script.
+
+Bad:
+
+```javascript
+const agents = [
+  "person1@email.com",
+  "person2@email.com"
+];
+```
+
+Better:
+
+Use a sheet tab called:
+
+```text
+Agent Directory
+```
+
+That way, when someone leaves, you delete them from the sheet. No code change. No redeploy. No begging the script like it is a cursed toaster.
+
+---
+
+# 4. Master Google Sheet Structure
+
+Create one main workbook:
+
+```text
+BMRX Productivity Reporting Engine
+```
+
+Inside it, create these tabs.
+
+---
+
+## 4.1 `Config` Tab
+
+This controls the whole system.
+
+| Setting                 |                                               Value | Notes                     |
+| ----------------------- | --------------------------------------------------: | ------------------------- |
+| DAILY_REPORT_ENABLED    |                                                TRUE | Turn daily email on/off   |
+| WEEKLY_REPORT_ENABLED   |                                                TRUE | Turn weekly email on/off  |
+| MONTHLY_REPORT_ENABLED  |                                                TRUE | Turn monthly email on/off |
+| SITE_SYNC_ENABLED       |                                               FALSE | Enable later              |
+| AI_SUMMARY_ENABLED      |                                                TRUE | Turn AI summary on/off    |
+| TIMEZONE                |                                 Africa/Johannesburg | Important                 |
+| WEEK_CUTOFF_DAY         |                                              Sunday | Weekly close              |
+| DAILY_REPORT_SEND_TIME  |                                               00:10 | After night shift closes  |
+| DAY_SHIFT_START         |                                               08:00 | Day shift                 |
+| DAY_SHIFT_END           |                                               16:00 | Day shift                 |
+| MID_SHIFT_START         |                                               16:00 | Mid shift                 |
+| MID_SHIFT_END           |                                               00:00 | Mid shift                 |
+| NIGHT_SHIFT_START       |                                               00:00 | Night shift               |
+| NIGHT_SHIFT_END         |                                               08:00 | Night shift               |
+| REPORT_OUTPUT_FOLDER_ID |                              Google Drive Folder ID | Where reports save        |
+| EMAIL_RECIPIENTS        | [management@email.com](mailto:management@email.com) | Comma-separated           |
+
+---
+
+## 4.2 `Agent Directory` Tab
+
+This becomes the source of truth for who gets included.
+
+| Active | Agent Name | Email                                   | Team    | Shift | Site   | Role  | Start Date | End Date   |
+| ------ | ---------- | --------------------------------------- | ------- | ----- | ------ | ----- | ---------- | ---------- |
+| TRUE   | John Smith | [john@email.com](mailto:john@email.com) | Support | Day   | Durban | Agent | 2026-01-01 |            |
+| TRUE   | Jane Doe   | [jane@email.com](mailto:jane@email.com) | Support | Mid   | Durban | Agent | 2026-01-01 |            |
+| FALSE  | Old Person | [old@email.com](mailto:old@email.com)   | Support | Night | Durban | Agent | 2026-01-01 | 2026-05-31 |
+
+### Why this matters
+
+Every pull uses only:
+
+```text
+Active = TRUE
+```
+
+So the API does not pull random people from the full Zendesk instance.
+
+---
+
+## 4.3 `Fiscal Calendar` Tab
+
+This handles payment reporting.
+
+| Date       | Fiscal Year | Fiscal Month | Fiscal Week | Week Start | Week End   | Month Start | Month End  |
+| ---------- | ----------- | ------------ | ----------- | ---------- | ---------- | ----------- | ---------- |
+| 2026-06-01 | FY2026      | 2026-06      | W01         | 2026-06-01 | 2026-06-07 | 2026-06-01  | 2026-06-30 |
+
+### Why this matters
+
+You do **not** want the report guessing week/month rules every time.
+
+The script should look up the date in this tab and say:
+
+> “This attendance/productivity belongs to Fiscal Week X and Fiscal Month Y.”
+
+Clean. Predictable. Boring in the best way.
+
+---
+
+## 4.4 `Raw Attendance` Tab
+
+This comes from your manually maintained sheet or copied yearly attendance sheet.
+
+| Date | Shift | Agent Name | Email | Status | Scheduled Start | Scheduled End | Actual Start | Actual End | Notes |
+| ---- | ----- | ---------- | ----- | ------ | --------------- | ------------- | ------------ | ---------- | ----- |
+
+Possible statuses:
+
+```text
+Present
+Absent
+Late
+Sick
+Leave
+AWOL
+Transport Issue
+Training
+Off
+```
+
+---
+
+## 4.5 `Raw Zendesk Tickets` Tab
+
+Pulled from API.
+
+| Pulled At | Ticket ID | Agent Email | Agent Name | Status | Created At | Solved At | Updated At | Form | Group | Tags | Channel |
+| --------- | --------- | ----------- | ---------- | ------ | ---------- | --------- | ---------- | ---- | ----- | ---- | ------- |
+
+This is raw. Do not clean it here.
+
+Raw data must stay raw. Humans ruin enough things already.
+
+---
+
+## 4.6 `Raw WFM` Tab
+
+Pulled from WFM API.
+
+| Pulled At | Agent Email | Agent Name | Date | Shift | Productive Time | Unproductive Time | General Task Time | Total Logged Time | Activity |
+| --------- | ----------- | ---------- | ---- | ----- | --------------- | ----------------- | ----------------- | ----------------- | -------- |
+
+---
+
+## 4.7 `Normalized Attendance` Tab
+
+Cleaned attendance.
+
+| Date | Fiscal Week | Fiscal Month | Shift | Agent Email | Agent Name | Attendance Status | Expected Hours | Actual Hours | Late Minutes | Attendance Score |
+|---|---|---|---|---|---|---:|---:|---:|---:|
+
+---
+
+## 4.8 `Normalized Ticket Productivity` Tab
+
+Cleaned ticket output.
+
+| Date | Fiscal Week | Fiscal Month | Shift | Agent Email | Agent Name | Tickets Solved | Tickets Updated | Tickets Created | Ticket Forms Worked | Ticket Score |
+| ---- | ----------- | ------------ | ----- | ----------- | ---------- | -------------: | --------------: | --------------: | ------------------- | -----------: |
+
+---
+
+## 4.9 `Normalized WFM Productivity` Tab
+
+Cleaned WFM productivity.
+
+| Date | Fiscal Week | Fiscal Month | Shift | Agent Email | Agent Name | Total Hours | Productive Hours | Unproductive Hours | General Task Hours | Productivity % |
+| ---- | ----------- | ------------ | ----- | ----------- | ---------- | ----------: | ---------------: | -----------------: | -----------------: | -------------: |
+
+---
+
+## 4.10 `Final Report Dataset` Tab
+
+This is the joined report table.
+
+One row per agent per period.
+
+| Period Type | Period Start | Period End | Fiscal Week | Fiscal Month | Agent Email | Agent Name | Shift | Attendance % | Tickets Solved | Productive Hours | Unproductive Hours | Productivity % | Notes |
+| ----------- | ------------ | ---------- | ----------- | ------------ | ----------- | ---------- | ----- | -----------: | -------------: | ---------------: | -----------------: | -------------: | ----- |
+
+This is what gets exported into Excel and summarized by AI.
+
+---
+
+# 5. Data Pull Timing
+
+You have three shifts:
+
+| Shift | Time           |
+| ----- | -------------- |
+| Day   | 08:00 to 16:00 |
+| Mid   | 16:00 to 00:00 |
+| Night | 00:00 to 08:00 |
+
+Pull data **5 to 10 minutes after shift close**.
+
+| Pull                    | Time                                     |
+| ----------------------- | ---------------------------------------- |
+| Night shift pull        | 08:05                                    |
+| Day shift pull          | 16:05                                    |
+| Mid shift pull          | 00:05                                    |
+| Daily report generation | 00:10 or 08:10 depending reporting logic |
+
+### Important note
+
+For daily reporting, decide what “one day” means.
+
+You have two options:
+
+## Option A: Calendar Day
+
+```text
+00:00 to 23:59
+```
+
+Simple, but mid shift ends at midnight and can become awkward.
+
+## Option B: Operational Day
+
+```text
+08:00 to next day 08:00
+```
+
+This is better for your shift setup.
+
+Recommended:
+
+> Use **Operational Day: 08:00 to 08:00**
+
+That means the full business day includes:
+
+```text
+Day shift:   08:00 to 16:00
+Mid shift:   16:00 to 00:00
+Night shift: 00:00 to 08:00
+```
+
+Then send the full daily report after the night shift closes:
+
+```text
+08:10
+```
+
+This is cleaner for operations and payment reporting.
+
+---
+
+# 6. API Pull Logic
+
+## 6.1 Agent Filter Logic
+
+The script starts by reading:
+
+```text
+Agent Directory
+```
+
+Then it filters:
+
+```text
+Active = TRUE
+```
+
+Then it builds an email list:
+
+```text
+[
+  "agent1@email.com",
+  "agent2@email.com",
+  "agent3@email.com"
+]
+```
+
+Then every API request only pulls data for those users.
+
+---
+
+## 6.2 Zendesk Ticket Pull
+
+The Apps Script should:
+
+1. Read active agents from `Agent Directory`
+2. Get report window
+3. Call Zendesk API
+4. Pull tickets updated/solved in that window
+5. Match tickets to assignee email
+6. Write raw results to `Raw Zendesk Tickets`
+7. Avoid duplicates using Ticket ID + Updated At or Ticket ID + Solved At
+
+### Ticket fields needed
+
+Minimum:
+
+```text
+Ticket ID
+Assignee ID
+Assignee Email
+Status
+Created At
+Solved At
+Updated At
+Ticket Form
+Group
+Tags
+Channel
+```
+
+---
+
+## 6.3 WFM Pull
+
+The Apps Script should:
+
+1. Read active agents
+2. Get report window
+3. Call WFM API
+4. Pull productivity/activity records
+5. Match by agent email
+6. Write raw data to `Raw WFM`
+7. Avoid duplicate records using Agent Email + Date + Activity + Time Range
+
+---
+
+## 6.4 Attendance Pull
+
+Attendance is not coming from API yet.
+
+For now:
+
+1. Maintain yearly attendance in Google Sheets
+2. Include email or agent mapping
+3. Script reads attendance records for the report window
+4. Normalize into `Normalized Attendance`
+
+Recommended approach:
+
+Do **not** rely only on names.
+
+Names are messy.
+
+Use email as the matching key.
+
+If you do not want visible emails in attendance, create a hidden mapping tab:
+
+```text
+Attendance Name Map
+```
+
+| Attendance Name | Email                                   |
+| --------------- | --------------------------------------- |
+| John S          | [john@email.com](mailto:john@email.com) |
+| Jane Doe        | [jane@email.com](mailto:jane@email.com) |
+
+Then the script can match:
+
+```text
+Attendance Name -> Email -> Agent Directory
+```
+
+---
+
+# 7. Normalization Logic
+
+Raw data must be cleaned into a standard format.
+
+## 7.1 Normalize Attendance
+
+For each attendance row:
+
+```text
+Date
+Agent Email
+Shift
+Attendance Status
+Expected Hours
+Actual Hours
+Late Minutes
+```
+
+Then calculate:
+
+```text
+Attendance Score
+```
+
+Example scoring:
+
+| Status           |    Score |
+| ---------------- | -------: |
+| Present          |        1 |
+| Late             |     0.75 |
+| Sick with notice |     0.75 |
+| Leave approved   | Excluded |
+| Absent           |        0 |
+| AWOL             |        0 |
+
+---
+
+## 7.2 Normalize Tickets
+
+For each agent in the report period:
+
+Calculate:
+
+```text
+Tickets Solved
+Tickets Updated
+Tickets Created
+Forms Worked
+Groups Worked
+```
+
+You can also create weighted ticket points later:
+
+| Ticket Type           | Weight |
+| --------------------- | -----: |
+| Simple support ticket |      1 |
+| Technical ticket      |      2 |
+| Escalation            |      3 |
+| QA / Review           |    1.5 |
+
+But for phase 1, keep it simple:
+
+```text
+Tickets Solved = count of solved tickets
+```
+
+Do not overcomplicate it early. That is how projects go to die in a spreadsheet-shaped coffin. ⚰️
+
+---
+
+## 7.3 Normalize WFM
+
+For each agent:
+
+```text
+Total Hours
+Productive Hours
+Unproductive Hours
+General Task Hours
+Productivity %
+```
+
+Formula:
+
+```text
+Productivity % = Productive Hours / Total Logged Hours
+```
+
+But exclude approved non-working time where needed.
+
+---
+
+# 8. Join Logic
+
+Once all three normalized datasets exist:
+
+```text
+Normalized Attendance
+Normalized Ticket Productivity
+Normalized WFM Productivity
+```
+
+The script joins them using:
+
+```text
+Agent Email + Date + Shift
+```
+
+For weekly/monthly:
+
+```text
+Agent Email + Fiscal Week
+Agent Email + Fiscal Month
+```
+
+Final output:
+
+```text
+Attendance + Tickets + WFM = Final Report Dataset
+```
+
+---
+
+# 9. Report Types
+
+## 9.1 Daily Report
+
+Window:
+
+```text
+Operational day: 08:00 to next day 08:00
+```
+
+Runs:
+
+```text
+08:10 daily
+```
+
+Output:
+
+```text
+Daily Productivity Report - 2026-06-04.xlsx
+```
+
+Includes:
+
+* Attendance summary
+* Shift summary
+* Ticket summary
+* WFM productivity
+* Exceptions
+* Top performers
+* Agents needing review
+* AI summary
+
+---
+
+## 9.2 Weekly Report
+
+Window:
+
+```text
+Monday 08:00 to next Monday 08:00
+```
+
+Or, if Sunday is your cutoff:
+
+```text
+Monday to Sunday
+```
+
+Runs:
+
+```text
+Monday 08:15
+```
+
+Recommended, because Sunday 00:00 can miss late night operational data.
+
+Output:
+
+```text
+Weekly Productivity Report - FY2026 W23.xlsx
+```
+
+Includes:
+
+* Weekly attendance %
+* Weekly productivity %
+* Total tickets solved
+* Total productive hours
+* AWOL/absence list
+* Late trends
+* Agent ranking
+* AI management summary
+
+---
+
+## 9.3 Monthly Report
+
+Window:
+
+```text
+Fiscal month start to fiscal month end
+```
+
+Runs:
+
+```text
+1st day of next month at 08:30
+```
+
+Output:
+
+```text
+Monthly Productivity Report - 2026-06.xlsx
+```
+
+Includes:
+
+* Attendance/payment support
+* Total hours
+* Productivity %
+* Ticket output
+* Shift comparison
+* Exceptions
+* Recommended action list
+* AI executive summary
+
+---
+
+# 10. Excel Report Structure
+
+Each generated Excel file should contain tabs:
+
+| Tab               | Purpose                              |
+| ----------------- | ------------------------------------ |
+| Executive Summary | AI-written summary                   |
+| Agent Summary     | One row per agent                    |
+| Shift Summary     | Day/Mid/Night comparison             |
+| Attendance Detail | Attendance rows                      |
+| Ticket Detail     | Ticket rows                          |
+| WFM Detail        | WFM rows                             |
+| Exceptions        | Missing data, AWOL, low productivity |
+| Raw Export Info   | Pull timestamp and report window     |
+
+---
+
+# 11. AI Summary Logic
+
+Do not send the AI raw rows if there are thousands.
+
+That is expensive and dumb, which means someone will suggest it in a meeting. 🤖
+
+Instead, send the AI the already-normalized summary.
+
+## AI input should look like this:
+
+```json
+{
+  "report_type": "daily",
+  "period_start": "2026-06-04 08:00",
+  "period_end": "2026-06-05 08:00",
+  "shift_summary": [
+    {
+      "shift": "Day",
+      "attendance_rate": 0.94,
+      "productivity_rate": 0.81,
+      "tickets_solved": 123
+    }
+  ],
+  "agent_exceptions": [
+    {
+      "agent": "John Smith",
+      "issue": "Low WFM productivity",
+      "productivity": 0.42
+    }
+  ],
+  "top_performers": [
+    {
+      "agent": "Jane Doe",
+      "reason": "High ticket output and strong productivity"
+    }
+  ]
+}
+```
+
+## AI output should produce:
+
+```text
+1. Top-level operational summary
+2. Attendance concerns
+3. Productivity concerns
+4. Ticket output summary
+5. Key risks
+6. Recommended actions
+```
+
+---
+
+# 12. Email Output
+
+Subject examples:
+
+## Daily
+
+```text
+Daily Productivity Summary | 04 June 2026
+```
+
+## Weekly
+
+```text
+Weekly Productivity Summary | FY2026 W23
+```
+
+## Monthly
+
+```text
+Monthly Productivity Summary | June 2026
+```
+
+Email body:
+
+```text
+Good morning,
+
+Please find attached the productivity summary for [period].
+
+Top-level summary:
+[AI summary here]
+
+Key points:
+- Attendance:
+- Ticket output:
+- WFM productivity:
+- Exceptions:
+- Recommended actions:
+
+The full Excel report is attached for review.
+
+Kind regards,
+Automated Reporting System
+```
+
+Attachment:
+
+```text
+Generated Excel file
+```
+
+---
+
+# 13. Site Plan
+
+The site comes after the email system works.
+
+Recommended stack:
+
+| Layer       | Tool                                    |
+| ----------- | --------------------------------------- |
+| Frontend    | React                                   |
+| Hosting     | Cloudflare Pages                        |
+| Backend API | Cloudflare Worker                       |
+| Storage     | Google Drive or Google Sheets           |
+| Auth        | Google login or simple protected access |
+| Reports     | Excel files stored in Drive             |
+| Data Source | Normalized Google Sheet                 |
+
+---
+
+## Site Features
+
+Phase 1:
+
+* View daily reports
+* View weekly reports
+* View monthly reports
+* Filter by date
+* Filter by agent
+* Filter by shift
+* Download Excel report
+
+Phase 2:
+
+* Agent trend graphs
+* Attendance heatmap
+* Productivity ranking
+* Ticket output by form/group
+* Exceptions dashboard
+
+Phase 3:
+
+* Manual rerun button
+* Report approval status
+* Management comments
+* Export PDF
+
+---
+
+# 14. Integration Points
+
+| Integration       | From         | To                 | Purpose                      |
+| ----------------- | ------------ | ------------------ | ---------------------------- |
+| Zendesk API       | Zendesk      | Apps Script        | Pull ticket data             |
+| WFM API           | WFM/Zendesk  | Apps Script        | Pull productivity time       |
+| Google Sheets     | Apps Script  | Sheets             | Store raw + normalized data  |
+| Google Drive      | Apps Script  | Drive              | Save generated Excel reports |
+| AI API            | Apps Script  | AI model           | Generate summary             |
+| Gmail             | Apps Script  | Email              | Send reports                 |
+| Cloudflare Pages  | User browser | Site               | View reports                 |
+| Cloudflare Worker | Site         | Google Sheet/Drive | Fetch reports/data           |
+
+---
+
+# 15. Required Apps Script Modules
+
+Split the Apps Script into files.
+
+```text
+Config.gs
+Agents.gs
+FiscalCalendar.gs
+ZendeskApi.gs
+WfmApi.gs
+Attendance.gs
+Normalize.gs
+ReportBuilder.gs
+AiSummary.gs
+EmailService.gs
+DriveService.gs
+Scheduler.gs
+Logger.gs
+ManualRun.gs
+```
+
+Do not build one giant script file unless you enjoy debugging pain like it owes you money.
+
+---
+
+# 16. Apps Script Function Plan
+
+## Config
+
+```javascript
+getConfig()
+isDailyEnabled()
+isWeeklyEnabled()
+isMonthlyEnabled()
+getReportRecipients()
+getOutputFolderId()
+```
+
+## Agents
+
+```javascript
+getActiveAgents()
+getAgentByEmail(email)
+getAgentEmailMap()
+```
+
+## Fiscal Calendar
+
+```javascript
+getFiscalInfo(date)
+getCurrentFiscalWeek(date)
+getCurrentFiscalMonth(date)
+getReportWindow(reportType)
+```
+
+## Zendesk
+
+```javascript
+pullZendeskTickets(startDate, endDate, agents)
+writeRawZendeskTickets(rows)
+```
+
+## WFM
+
+```javascript
+pullWfmProductivity(startDate, endDate, agents)
+writeRawWfmRows(rows)
+```
+
+## Attendance
+
+```javascript
+readAttendance(startDate, endDate)
+normalizeAttendance(rows)
+```
+
+## Normalize
+
+```javascript
+normalizeTicketData(rawTickets)
+normalizeWfmData(rawWfm)
+buildFinalReportDataset(reportType, startDate, endDate)
+```
+
+## Report Builder
+
+```javascript
+generateExcelReport(reportType, finalDataset)
+saveReportToDrive(file)
+```
+
+## AI Summary
+
+```javascript
+buildAiPayload(finalDataset)
+generateAiSummary(payload)
+```
+
+## Email
+
+```javascript
+sendReportEmail(reportType, aiSummary, excelFile)
+```
+
+## Scheduler
+
+```javascript
+runShiftPull()
+runDailyReport()
+runWeeklyReport()
+runMonthlyReport()
+```
+
+## Manual Run
+
+```javascript
+manualRunDaily(date)
+manualRunWeekly(week)
+manualRunMonthly(month)
+```
+
+---
+
+# 17. Trigger Plan
+
+Create time-based triggers.
+
+| Function              | Time          | Purpose                          |
+| --------------------- | ------------- | -------------------------------- |
+| `runShiftPullNight()` | 08:05         | Pull night shift data            |
+| `runShiftPullDay()`   | 16:05         | Pull day shift data              |
+| `runShiftPullMid()`   | 00:05         | Pull mid shift data              |
+| `runDailyReport()`    | 08:10         | Send full operational day report |
+| `runWeeklyReport()`   | Monday 08:15  | Send previous week report        |
+| `runMonthlyReport()`  | 1st day 08:30 | Send previous month report       |
+
+### Important
+
+Apps Script triggers are not always exact to the second. So the script must calculate the correct report window itself.
+
+Do **not** trust trigger time alone.
+
+---
+
+# 18. Error Handling
+
+Create a tab:
+
+```text
+Error Log
+```
+
+| Timestamp | Function | Error Type | Message | Status | Retry Count |
+| --------- | -------- | ---------- | ------- | ------ | ----------: |
+
+Examples:
+
+| Error               | Action                            |
+| ------------------- | --------------------------------- |
+| Zendesk API fails   | Retry 3 times                     |
+| WFM API fails       | Log error and continue attendance |
+| AI fails            | Send report without AI summary    |
+| Email fails         | Log and retry                     |
+| Missing agent email | Put in Exceptions tab             |
+| Duplicate ticket    | Skip duplicate                    |
+
+---
+
+# 19. Audit Log
+
+Create a tab:
+
+```text
+Run Log
+```
+
+| Run ID | Report Type | Started At | Ended At | Status | Rows Processed | File Link | Email Sent |
+| ------ | ----------- | ---------- | -------- | ------ | -------------: | --------- | ---------- |
+
+This helps prove the system ran.
+
+Very useful when someone says, “I didn’t get it,” which is corporate for “I ignored the email.”
+
+---
+
+# 20. Security Setup
+
+Do not store API keys directly in sheet cells.
+
+Use Apps Script Properties:
+
+```text
+Script Properties
+```
+
+Store:
+
+```text
+ZENDESK_SUBDOMAIN
+ZENDESK_EMAIL
+ZENDESK_API_TOKEN
+WFM_API_KEY
+AI_API_KEY
+```
+
+The sheet should only store non-sensitive settings.
+
+---
+
+# 21. Implementation Phases
+
+## Phase 1: Sheet Foundation
+
+Build:
+
+* Config tab
+* Agent Directory tab
+* Fiscal Calendar tab
+* Raw tabs
+* Normalized tabs
+* Final Report Dataset tab
+* Error Log
+* Run Log
+
+Outcome:
+
+> The workbook is ready to receive structured data.
+
+---
+
+## Phase 2: Attendance Normalization
+
+Build:
+
+* Yearly attendance sheet
+* Attendance mapping
+* Normalize attendance script
+* Attendance summary output
+
+Outcome:
+
+> Attendance can be converted into clean reporting rows.
+
+---
+
+## Phase 3: Zendesk Ticket API Pull
+
+Build:
+
+* Zendesk authentication
+* Ticket pull by date window
+* Agent matching
+* Raw ticket write
+* Duplicate prevention
+* Ticket summary normalization
+
+Outcome:
+
+> Ticket productivity can be calculated automatically.
+
+---
+
+## Phase 4: WFM API Pull
+
+Build:
+
+* WFM authentication
+* Productivity pull by date window
+* Agent matching
+* Raw WFM write
+* WFM normalization
+
+Outcome:
+
+> Productive/unproductive hours can be calculated automatically.
+
+---
+
+## Phase 5: Final Dataset Join
+
+Build:
+
+* Join attendance + tickets + WFM
+* Match by email/date/shift
+* Create final reporting dataset
+* Add exception logic
+
+Outcome:
+
+> One clean dataset exists for reporting.
+
+---
+
+## Phase 6: Excel Report Generator
+
+Build:
+
+* Daily Excel report
+* Weekly Excel report
+* Monthly Excel report
+* Save files to Drive
+* Include report tabs
+
+Outcome:
+
+> The system generates proper Excel reports.
+
+---
+
+## Phase 7: AI Summary
+
+Build:
+
+* Create compact AI payload
+* Send only summarized data
+* Generate management-friendly summary
+* Insert into email and Excel
+
+Outcome:
+
+> Management gets the short version instead of drowning in rows.
+
+---
+
+## Phase 8: Email Automation
+
+Build:
+
+* Daily email
+* Weekly email
+* Monthly email
+* Enable/disable from Config
+* Attach Excel
+* Include AI summary
+
+Outcome:
+
+> Reports are sent automatically.
+
+---
+
+## Phase 9: Cloudflare Site
+
+Build only after the email flow works.
+
+Build:
+
+* React frontend
+* Cloudflare Pages hosting
+* Cloudflare Worker API
+* Report list page
+* Download report page
+* Filter by date/agent/shift
+* Pull from normalized data or Drive reports
+
+Outcome:
+
+> Management can self-serve reports.
+
+---
+
+# 22. Best Data Flow
+
+Use this order every time:
+
+```text
+1. Read Config
+2. Read Active Agents
+3. Determine Report Window
+4. Pull Raw Zendesk Data
+5. Pull Raw WFM Data
+6. Read Attendance Data
+7. Normalize Attendance
+8. Normalize Tickets
+9. Normalize WFM
+10. Join Final Dataset
+11. Generate Excel
+12. Generate AI Summary
+13. Send Email
+14. Log Run
+```
+
+---
+
+# 23. What You Should Build First Tomorrow
+
+Start with this exact order:
+
+## Step 1
+
+Create the master workbook with these tabs:
+
+```text
+Config
+Agent Directory
+Fiscal Calendar
+Raw Attendance
+Raw Zendesk Tickets
+Raw WFM
+Normalized Attendance
+Normalized Ticket Productivity
+Normalized WFM Productivity
+Final Report Dataset
+Generated Reports
+Run Log
+Error Log
+```
+
+## Step 2
+
+Create the `Agent Directory`.
+
+Do this before API work.
+
+## Step 3
+
+Create the fiscal calendar.
+
+This prevents weekly/monthly report chaos later.
+
+## Step 4
+
+Create attendance normalization.
+
+This is easiest and proves the model.
+
+## Step 5
+
+Add Zendesk ticket pull.
+
+## Step 6
+
+Add WFM pull.
+
+## Step 7
+
+Generate Excel.
+
+## Step 8
+
+Add email.
+
+## Step 9
+
+Add AI summary.
+
+## Step 10
+
+Build site last.
+
+---
+
+# 24. Final Decision
+
+Your thinking is mostly correct.
+
+The only change I would make:
+
+> Do **not** send daily at 00:00.
+> Send daily after the full operational day closes at **08:10**.
+
+Because your operational day naturally ends after night shift:
+
+```text
+08:00 to next day 08:00
+```
+
+That gives you one complete business cycle:
+
+```text
+Day + Mid + Night
+```
+
+Clean reporting. Clean attendance. Clean payroll support. Less spreadsheet witchcraft. 🧙‍♂️
+
+---
+
+# 25. Final Build Summary
+
+```text
+Google Sheet = data engine
+Apps Script = automation engine
+Zendesk API = ticket productivity source
+WFM API = time/productivity source
+Attendance Sheet = manual attendance source
+AI Model = summary generator
+Google Drive = report storage
+Gmail = report delivery
+Cloudflare = future dashboard
+```
+
+Build the reporting engine first.
+
+Then the email.
+
+Then the AI.
+
+Then the site.
+
+That is the sane order, which means someone will probably try to reverse it. Don’t.

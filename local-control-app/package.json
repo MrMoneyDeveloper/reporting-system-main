@@ -1,0 +1,9 @@
+{
+  "name": "reporting-local-control-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Developer-only control scaffold for syncing and invoking the Apps Script reporting engine.",
+  "scripts": {
+    "start": "node src/index.js"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "bmrx-productivity-reporting-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local source repo for a Google Sheets and Apps Script productivity reporting engine.",
+  "scripts": {
+    "clasp:login": "clasp login",
+    "clasp:push": "clasp push",
+    "clasp:pull": "clasp pull",
+    "clasp:deploy": "clasp deploy",
+    "clasp:open": "clasp open"
+  }
+}

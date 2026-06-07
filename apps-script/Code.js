@@ -34,6 +34,7 @@ function onOpen() {
     .addItem('Clean Up Retired Tabs', 'manualCleanUpRetiredWorkbook')
     .addItem('Inspect Attendance Source', 'manualInspectAttendanceSource')
     .addItem('Repair Raw Attendance From Source', 'manualRepairRawAttendanceFromSource')
+    .addItem('Test Gemini Config', 'manualTestGeminiConfig')
     .addItem('Test Gemini Dashboard Insight', 'manualTestGeminiDashboardInsight')
     .addSeparator()
     .addItem('Clean Duplicate Projects', 'trashDuplicateAppsScriptProjects')
@@ -156,6 +157,8 @@ function doPost(e) {
       result = manualVerifyDashboardDeploymentReadiness();
     } else if (action === 'testGeminiDashboardInsight') {
       result = manualTestGeminiDashboardInsight();
+    } else if (action === 'testGeminiConfig') {
+      result = manualTestGeminiConfig();
     } else if (action === 'testDashboardMiddlewareAndCache') {
       result = manualTestDashboardMiddlewareAndCache();
     } else if (action === 'dashboardHardRefresh') {

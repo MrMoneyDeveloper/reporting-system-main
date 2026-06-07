@@ -94,8 +94,8 @@ function getDashboardInsight(request) {
     return { status: 'SUCCESS', insight: fallback + '\nAI summary disabled in Config.', fallback: true };
   }
 
-  if (!getScriptProperty_('AI_API_KEY')) {
-    return { status: 'SUCCESS', insight: fallback + '\nAI_API_KEY is not configured, so this fallback insight was used.', fallback: true };
+  if (!getAiApiKey_().value) {
+    return { status: 'SUCCESS', insight: fallback + '\nAI_API_KEY or GEMINI_API_KEY is not configured, so this fallback insight was used.', fallback: true };
   }
 
   var prompt = [
@@ -236,8 +236,9 @@ function verifyDashboardDeploymentReadiness_() {
       currentReportView: getSheetData(SHEET_NAMES.CURRENT_REPORT_VIEW).length
     },
     gemini: {
-      apiKeyPresent: Boolean(getScriptProperty_('AI_API_KEY')),
-      model: getAiModel_()
+      apiKeyPresent: Boolean(getAiApiKey_().value),
+      model: getAiModel_(),
+      diagnostic: getGeminiDiagnostic_()
     },
     webApp: {
       htmlTemplate: 'Dashboard',

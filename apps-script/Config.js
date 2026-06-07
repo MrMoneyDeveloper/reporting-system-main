@@ -247,7 +247,9 @@ function validateScriptProperties() {
 
   for (var i = 0; i < REQUIRED_SCRIPT_PROPERTIES.length; i++) {
     var key = REQUIRED_SCRIPT_PROPERTIES[i];
-    if (getScriptProperty_(key)) {
+    if (key === 'AI_API_KEY' && getAiApiKey_().value) {
+      present.push(key);
+    } else if (getScriptProperty_(key)) {
       present.push(key);
     } else {
       missing.push(key);

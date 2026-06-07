@@ -72,7 +72,7 @@ function generateAiSummary(payload) {
     return 'AI summary disabled in Config.';
   }
 
-  var apiKey = getScriptProperty_('AI_API_KEY');
+  var apiKey = getAiApiKey_().value;
   if (!apiKey) {
     logError('generateAiSummary', new Error('AI_API_KEY Script Property is not configured; using fallback summary.'), 'SKIPPED', 0);
     return buildFallbackAiSummary_(payload);
@@ -99,9 +99,9 @@ function generateAiSummary(payload) {
 }
 
 function callGeminiGenerateContent_(prompt, options) {
-  var apiKey = getScriptProperty_('AI_API_KEY');
-  if (!apiKey) {
-    throw new Error('AI_API_KEY Script Property is not configured.');
+  var apiKeyInfo = getAiApiKey_();
+  if (!apiKeyInfo.value) {
+    throw new Error('AI_API_KEY or GEMINI_API_KEY is not configured.');
   }
 
   var opts = options || {};
@@ -122,7 +122,7 @@ function callGeminiGenerateContent_(prompt, options) {
     method: 'post',
     contentType: 'application/json',
     headers: {
-      'x-goog-api-key': apiKey
+      'x-goog-api-key': apiKeyInfo.value
     },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
@@ -153,6 +153,112 @@ function callGeminiGenerateContent_(prompt, options) {
   }
 
   return text.join('\n').trim();
+}
+
+function getAiApiKey_() {
+  var sources = [
+    { name: 'Script Property AI_API_KEY', value: getScriptProperty_('AI_API_KEY') },
+    { name: 'Script Property GEMINI_API_KEY', value: getScriptProperty_('GEMINI_API_KEY') },
+    { name: 'Config AI_API_KEY', value: getConfigValue('AI_API_KEY', '') },
+    { name: 'Config GEMINI_API_KEY', value: getConfigValue('GEMINI_API_KEY', '') }
+  ];
+
+  for (var i = 0; i < sources.length; i++) {
+    var normalized = normalizeSecretValue_(sources[i].value);
+    if (normalized) {
+      return {
+        source: sources[i].name,
+        value: normalized,
+        masked: maskApiKey_(normalized),
+        length: normalized.length,
+        hasWhitespaceTrimmed: String(sources[i].value || '').length !== normalized.length
+      };
+    }
+  }
+
+  return {
+    source: '',
+    value: '',
+    masked: '',
+    length: 0,
+    hasWhitespaceTrimmed: false
+  };
+}
+
+function normalizeSecretValue_(value) {
+  var text = String(value || '').trim();
+  if ((text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') ||
+      (text.charAt(0) === "'" && text.charAt(text.length - 1) === "'")) {
+    text = text.slice(1, -1).trim();
+  }
+  return text;
+}
+
+function maskApiKey_(value) {
+  var text = String(value || '');
+  if (!text) {
+    return '';
+  }
+  if (text.length <= 10) {
+    return text.charAt(0) + '***' + text.charAt(text.length - 1);
+  }
+  return text.slice(0, 6) + '...' + text.slice(-4);
+}
+
+function getGeminiDiagnostic_() {
+  var apiKeyInfo = getAiApiKey_();
+  var model = normalizeGeminiModelName_(getAiModel_());
+  return {
+    status: apiKeyInfo.value ? 'CONFIGURED' : 'MISSING_KEY',
+    keySource: apiKeyInfo.source,
+    keyMasked: apiKeyInfo.masked,
+    keyLength: apiKeyInfo.length,
+    keyWhitespaceOrQuotesTrimmed: apiKeyInfo.hasWhitespaceTrimmed,
+    model: model,
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/' + model + ':generateContent'
+  };
+}
+
+function testGeminiConfig_() {
+  var diagnostic = getGeminiDiagnostic_();
+  var result = {
+    status: diagnostic.status,
+    diagnostic: diagnostic,
+    generatedAt: formatDateTime_(new Date())
+  };
+
+  if (diagnostic.status !== 'CONFIGURED') {
+    logPipelineEvent_({
+      reportType: 'Gemini Diagnostic',
+      phase: 'gemini-config',
+      status: 'MISSING_KEY',
+      message: 'Gemini key is missing. Configure AI_API_KEY or GEMINI_API_KEY in Script Properties.',
+      rowsProcessed: 0
+    });
+    return result;
+  }
+
+  try {
+    result.testText = callGeminiGenerateContent_('Reply with exactly: OK', {
+      model: getAiModel_(),
+      temperature: 0,
+      maxOutputTokens: 20
+    });
+    result.status = 'SUCCESS';
+  } catch (error) {
+    result.status = 'FAILED';
+    result.message = compactLogMessage_(error.message || String(error));
+  }
+
+  logPipelineEvent_({
+    reportType: 'Gemini Diagnostic',
+    phase: 'gemini-config',
+    status: result.status,
+    message: 'Gemini diagnostic: source=' + diagnostic.keySource + ', key=' + diagnostic.keyMasked + ', length=' + diagnostic.keyLength + ', model=' + diagnostic.model + (result.message ? ', message=' + result.message : ''),
+    rowsProcessed: 1
+  });
+
+  return result;
 }
 
 function normalizeGeminiModelName_(model) {

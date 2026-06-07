@@ -102,6 +102,10 @@ function manualTestGeminiDashboardInsight() {
   return testGeminiDashboardInsight_();
 }
 
+function manualTestGeminiConfig() {
+  return testGeminiConfig_();
+}
+
 function manualVerifyDashboardDeploymentReadiness() {
   return verifyDashboardDeploymentReadiness_();
 }

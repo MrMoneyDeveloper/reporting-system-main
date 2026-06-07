@@ -153,13 +153,28 @@ function sanitizeApiPayloadDepth_(value, depth) {
   var keys = Object.keys(value).sort();
   for (var j = 0; j < keys.length; j++) {
     var key = keys[j];
-    if (/secret|token|key|password|authorization/i.test(key)) {
+    if (isSensitiveApiField_(key)) {
       output[key] = '[redacted]';
     } else {
       output[key] = sanitizeApiPayloadDepth_(value[key], depth + 1);
     }
   }
   return output;
+}
+
+function isSensitiveApiField_(key) {
+  var normalized = String(key || '').toLowerCase();
+  return normalized === 'secret' ||
+    normalized === 'token' ||
+    normalized === 'apikey' ||
+    normalized === 'api_key' ||
+    normalized === 'key' ||
+    normalized === 'password' ||
+    normalized === 'authorization' ||
+    normalized.indexOf('secret') !== -1 ||
+    normalized.indexOf('token') !== -1 ||
+    normalized.indexOf('password') !== -1 ||
+    normalized.indexOf('authorization') !== -1;
 }
 
 function markDashboardApiRequest_(endpointName) {
@@ -191,4 +206,3 @@ function getApiResponseSizeBytes_(payload) {
     return 0;
   }
 }
-

@@ -430,6 +430,7 @@
         const sync = props.syncStatus || {};
         const source = sync.sourceSync || {};
         const analytics = sync.analytics || {};
+        const apiLogging = sync.apiLogging || {};
         const triggers = (sync.triggers || {});
         const expected = triggers.expected || [];
         const present = triggers.present || [];
@@ -448,6 +449,12 @@
             h(StatusCard, { label: 'Analytics Job', value: analytics.active ? ('Active: ' + analytics.phase + ' ' + analytics.cursor + ' -> ' + analytics.end) : 'Idle' }),
             h(StatusCard, { label: 'Cache Version', value: sync.cacheVersion || freshness.cacheVersion || '-' }),
             h(StatusCard, { label: 'Status Checked', value: sync.generatedAt || '-' })
+          ),
+          h('div', { className: 'row g-3' },
+            h(StatusCard, { label: 'Last API Request', value: freshness.lastDashboardApiRequest || apiLogging.lastRequestAt || 'Not recorded' }),
+            h(StatusCard, { label: 'Last API Endpoint', value: freshness.lastDashboardApiEndpoint || apiLogging.lastEndpoint || '-' }),
+            h(StatusCard, { label: 'API Log Mode', value: apiLogging.mode || 'SUMMARY' }),
+            h(StatusCard, { label: 'Cache TTL', value: (apiLogging.cacheTtlSeconds || '-') + ' sec' })
           ),
           h(TableCard, { title: 'Managed Triggers', rows: triggerRows, columns: [{ key: 'handler', label: 'Handler' }, { key: 'present', label: 'Status' }], pageSize: 12 }),
           h(TableCard, {

@@ -47,6 +47,11 @@ var DEFAULT_CONFIG_ROWS = Object.freeze([
   ['ANALYTICS_DAYS_PER_EXECUTION', '7', 'How many operational days to rebuild per analytics history continuation'],
   ['ANALYTICS_MAX_RUNTIME_SECONDS', '240', 'Soft runtime cap for one analytics rebuild execution'],
   ['ANALYTICS_CONTINUATION_DELAY_SECONDS', '60', 'Delay before the next analytics rebuild continuation trigger'],
+  ['DASHBOARD_CACHE_TTL_SECONDS', '300', 'How long dashboard bootstrap and metric payloads stay cached'],
+  ['DASHBOARD_INSIGHT_CACHE_TTL_SECONDS', '900', 'How long Gemini dashboard insight responses stay cached'],
+  ['DASHBOARD_CACHE_MAX_BYTES', '90000', 'Maximum dashboard cache payload size before skipping cache storage'],
+  ['DASHBOARD_API_LOG_MODE', 'SUMMARY', 'SUMMARY logs cache misses, slow calls, errors, and hard refreshes; VERBOSE logs all dashboard API calls'],
+  ['DASHBOARD_SLOW_REQUEST_MS', '5000', 'Dashboard API calls slower than this are logged to Pipeline Log'],
   ['ATTENDANCE_SYNC_ENABLED', 'TRUE', 'Read attendance from the external attendance spreadsheet when configured'],
   ['ATTENDANCE_SHEET_NAME', '', 'Optional source tab name in the external attendance spreadsheet'],
   ['EMAIL_RECIPIENTS', 'management@email.com', 'Comma-separated management report recipients']

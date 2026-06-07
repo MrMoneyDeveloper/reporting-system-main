@@ -106,6 +106,10 @@ function manualVerifyDashboardDeploymentReadiness() {
   return verifyDashboardDeploymentReadiness_();
 }
 
+function manualTestDashboardMiddlewareAndCache() {
+  return testDashboardMiddlewareAndCache_();
+}
+
 function manualRebuildLastClosedDailyDataset() {
   return populateDataset_('daily', new Date(), true);
 }

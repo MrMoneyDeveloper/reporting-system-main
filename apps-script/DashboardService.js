@@ -4,21 +4,35 @@ var DASHBOARD_LAST_SOURCE_SYNC_KEY_ = 'DASHBOARD_LAST_SOURCE_SYNC_AT';
 var DASHBOARD_CACHE_TTL_SECONDS_ = 300;
 
 function getDashboardBootstrapCached() {
-  return dashboardCachedResult_('bootstrap', {}, function () {
-    return getDashboardBootstrap();
+  return dashboardApiEndpoint_('getDashboardBootstrapCached', {}, function () {
+    return dashboardCachedResult_('bootstrap', {}, function () {
+      return getDashboardBootstrap();
+    });
+  }, {
+    cacheable: true
   });
 }
 
 function getDashboardMetricsCached(request) {
-  return dashboardCachedResult_('metrics', normalizeDashboardRequest_(request), function () {
-    return getDashboardMetrics(request);
+  var normalizedRequest = normalizeDashboardRequest_(request);
+  return dashboardApiEndpoint_('getDashboardMetricsCached', normalizedRequest, function () {
+    return dashboardCachedResult_('metrics', normalizedRequest, function () {
+      return getDashboardMetrics(normalizedRequest);
+    });
+  }, {
+    cacheable: true
   });
 }
 
 function getDashboardInsightCached(request) {
-  return dashboardCachedResult_('insight', normalizeDashboardRequest_(request), function () {
-    return getDashboardInsight(request);
-  }, 900);
+  var normalizedRequest = normalizeDashboardRequest_(request);
+  return dashboardApiEndpoint_('getDashboardInsightCached', normalizedRequest, function () {
+    return dashboardCachedResult_('insight', normalizedRequest, function () {
+      return getDashboardInsight(normalizedRequest);
+    }, getDashboardCacheTtlSeconds_('insight', 900));
+  }, {
+    cacheable: true
+  });
 }
 
 function getDashboardBootstrap() {
@@ -108,30 +122,40 @@ function getDashboardInsight(request) {
 }
 
 function startDashboardHardRefresh(request) {
-  setupProject();
-  clearDashboardCache_();
-  var sourceStatus = queueDashboardSourceSync_();
-  var analyticsStatus = refreshCurrentAnalytics_();
-  var status = getDashboardSyncStatus();
+  return dashboardApiEndpoint_('startDashboardHardRefresh', normalizeDashboardRequest_(request), function () {
+    setupProject();
+    clearDashboardCache_();
+    var sourceStatus = queueDashboardSourceSync_();
+    var analyticsStatus = refreshCurrentAnalytics_();
+    var status = buildDashboardSyncStatus_();
 
-  logPipelineEvent_({
-    reportType: 'Dashboard',
-    phase: 'hard-refresh',
-    status: 'QUEUED',
-    message: 'Dashboard hard refresh queued source sync and refreshed current analytics.',
-    rowsProcessed: analyticsStatus.dailyRows || 0
+    logPipelineEvent_({
+      reportType: 'Dashboard',
+      phase: 'hard-refresh',
+      status: 'QUEUED',
+      message: 'Dashboard hard refresh queued source sync and refreshed current analytics.',
+      rowsProcessed: analyticsStatus.dailyRows || 0
+    });
+
+    return {
+      status: 'QUEUED',
+      sourceSync: sourceStatus,
+      analytics: analyticsStatus,
+      syncStatus: status,
+      request: normalizeDashboardRequest_(request)
+    };
+  }, {
+    logAlways: true
   });
-
-  return {
-    status: 'QUEUED',
-    sourceSync: sourceStatus,
-    analytics: analyticsStatus,
-    syncStatus: status,
-    request: normalizeDashboardRequest_(request)
-  };
 }
 
 function getDashboardSyncStatus() {
+  return dashboardApiEndpoint_('getDashboardSyncStatus', {}, function () {
+    return buildDashboardSyncStatus_();
+  });
+}
+
+function buildDashboardSyncStatus_() {
   var properties = PropertiesService.getScriptProperties();
   var sourceJob = getLargeScriptState_(SOURCE_SYNC_JOB_KEY_);
   var analyticsJob = getLargeScriptState_(ANALYTICS_REBUILD_JOB_KEY_);
@@ -172,7 +196,16 @@ function getDashboardSyncStatus() {
       expected: getDashboardExpectedTriggerHandlers_(),
       present: triggerHandlers.sort()
     },
-    cacheVersion: getDashboardCacheVersion_()
+    cacheVersion: getDashboardCacheVersion_(),
+    apiLogging: {
+      mode: getConfigValue('DASHBOARD_API_LOG_MODE', 'SUMMARY'),
+      slowRequestMs: getDashboardSlowRequestMs_(),
+      cacheTtlSeconds: getDashboardCacheTtlSeconds_('metrics', DASHBOARD_CACHE_TTL_SECONDS_),
+      insightCacheTtlSeconds: getDashboardCacheTtlSeconds_('insight', 900),
+      cacheMaxBytes: getDashboardCacheMaxBytes_(),
+      lastRequestAt: properties.getProperty(DASHBOARD_LAST_API_REQUEST_KEY_) || '',
+      lastEndpoint: properties.getProperty(DASHBOARD_LAST_API_ENDPOINT_KEY_) || ''
+    }
   };
 }
 
@@ -211,6 +244,13 @@ function verifyDashboardDeploymentReadiness_() {
       frontend: 'React CDN + Bootstrap + Chart.js',
       healthUrlFormat: '?format=json'
     },
+    middleware: {
+      apiLoggingMode: getConfigValue('DASHBOARD_API_LOG_MODE', 'SUMMARY'),
+      slowRequestMs: getDashboardSlowRequestMs_(),
+      cacheTtlSeconds: getDashboardCacheTtlSeconds_('metrics', DASHBOARD_CACHE_TTL_SECONDS_),
+      insightCacheTtlSeconds: getDashboardCacheTtlSeconds_('insight', 900),
+      cacheMaxBytes: getDashboardCacheMaxBytes_()
+    },
     triggers: triggers,
     cacheVersion: getDashboardCacheVersion_()
   };
@@ -221,6 +261,44 @@ function verifyDashboardDeploymentReadiness_() {
     status: triggers.missing.length ? 'MISSING_TRIGGERS' : 'SUCCESS',
     message: 'Dashboard readiness checked. Metrics rows: daily=' + result.sheets.dailyMetrics + ', weekly=' + result.sheets.weeklyMetrics + ', monthly=' + result.sheets.monthlyMetrics + '. Missing triggers: ' + (triggers.missing.join(', ') || 'none') + '.',
     rowsProcessed: result.sheets.dailyMetrics + result.sheets.weeklyMetrics + result.sheets.monthlyMetrics
+  });
+
+  return result;
+}
+
+function testDashboardMiddlewareAndCache_() {
+  clearDashboardCache_();
+
+  var firstBootstrap = getDashboardBootstrapCached();
+  var secondBootstrap = getDashboardBootstrapCached();
+  var firstMetrics = getDashboardMetricsCached({ periodType: 'daily' });
+  var secondMetrics = getDashboardMetricsCached({ periodType: 'daily' });
+  var syncStatus = getDashboardSyncStatus();
+
+  var result = {
+    status: 'SUCCESS',
+    generatedAt: formatDateTime_(new Date()),
+    bootstrap: {
+      firstCacheHit: Boolean(firstBootstrap.cache && firstBootstrap.cache.hit),
+      secondCacheHit: Boolean(secondBootstrap.cache && secondBootstrap.cache.hit),
+      periods: firstBootstrap.periods || {}
+    },
+    metrics: {
+      firstCacheHit: Boolean(firstMetrics.cache && firstMetrics.cache.hit),
+      secondCacheHit: Boolean(secondMetrics.cache && secondMetrics.cache.hit),
+      rows: firstMetrics.rows ? firstMetrics.rows.length : 0,
+      cacheStatus: firstMetrics.cache ? firstMetrics.cache.status : ''
+    },
+    apiLogging: syncStatus.apiLogging || {},
+    api: syncStatus.api || {}
+  };
+
+  logPipelineEvent_({
+    reportType: 'Dashboard Diagnostic',
+    phase: 'middleware-cache',
+    status: result.metrics.secondCacheHit && result.bootstrap.secondCacheHit ? 'SUCCESS' : 'CHECK_CACHE',
+    message: 'Dashboard middleware/cache test completed. bootstrap second hit=' + result.bootstrap.secondCacheHit + ', metrics second hit=' + result.metrics.secondCacheHit + ', metric rows=' + result.metrics.rows + '.',
+    rowsProcessed: result.metrics.rows
   });
 
   return result;
@@ -541,6 +619,8 @@ function buildDashboardFreshness_() {
     latestWfmImport: latest ? formatDateTime_(latest) : '',
     lastSourceSync: properties.getProperty(DASHBOARD_LAST_SOURCE_SYNC_KEY_) || '',
     lastAnalyticsRefresh: properties.getProperty(DASHBOARD_LAST_ANALYTICS_REFRESH_KEY_) || '',
+    lastDashboardApiRequest: properties.getProperty(DASHBOARD_LAST_API_REQUEST_KEY_) || '',
+    lastDashboardApiEndpoint: properties.getProperty(DASHBOARD_LAST_API_ENDPOINT_KEY_) || '',
     cacheVersion: getDashboardCacheVersion_(),
     dailyMetricRows: getSheetData(SHEET_NAMES.DAILY_METRICS).length,
     weeklyMetricRows: getSheetData(SHEET_NAMES.WEEKLY_METRICS).length,
@@ -605,12 +685,15 @@ function dashboardCachedResult_(prefix, request, builder, ttlSeconds) {
   var cache = CacheService.getScriptCache();
   var key = dashboardCacheKey_(prefix, request);
   var cached = cache.get(key);
+  var ttl = getDashboardCacheTtlSeconds_(prefix, ttlSeconds || DASHBOARD_CACHE_TTL_SECONDS_);
 
   if (cached) {
     try {
       var parsed = JSON.parse(cached);
       parsed.cache = parsed.cache || {};
       parsed.cache.hit = true;
+      parsed.cache.servedAt = formatDateTime_(new Date());
+      parsed.cache.ttlSeconds = ttl;
       return parsed;
     } catch (ignored) {
       // Fall through and rebuild.
@@ -618,16 +701,30 @@ function dashboardCachedResult_(prefix, request, builder, ttlSeconds) {
   }
 
   var result = builder();
+  if (!result || typeof result !== 'object') {
+    result = { result: result };
+  }
   result.cache = {
     hit: false,
     generatedAt: formatDateTime_(new Date()),
-    version: getDashboardCacheVersion_()
+    version: getDashboardCacheVersion_(),
+    ttlSeconds: ttl,
+    status: 'MISS'
   };
+  result.cache.bytes = getApiResponseSizeBytes_(result);
+
+  if (result.cache.bytes > getDashboardCacheMaxBytes_()) {
+    result.cache.status = 'SKIPPED_TOO_LARGE';
+    return result;
+  }
 
   try {
-    cache.put(key, JSON.stringify(result), ttlSeconds || DASHBOARD_CACHE_TTL_SECONDS_);
+    cache.put(key, JSON.stringify(result), ttl);
+    result.cache.status = 'STORED';
   } catch (cacheError) {
     logError('dashboardCachedResult', cacheError, 'CONTINUED', 0);
+    result.cache.status = 'WRITE_FAILED';
+    result.cache.message = compactLogMessage_(cacheError.message || String(cacheError));
   }
 
   return result;

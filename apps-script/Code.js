@@ -18,6 +18,7 @@ function onOpen() {
     .addItem('Cancel Analytics Rebuild', 'manualCancelAnalyticsRebuild')
     .addItem('Refresh Current Analytics', 'manualRefreshCurrentAnalytics')
     .addItem('Verify Dashboard Deployment', 'manualVerifyDashboardDeploymentReadiness')
+    .addItem('Test Dashboard Middleware + Cache', 'manualTestDashboardMiddlewareAndCache')
     .addItem('Rebuild Last Closed Daily Dataset', 'manualRebuildLastClosedDailyDataset')
     .addItem('Rebuild Current Open Dataset', 'manualRebuildReportDataset')
     .addSeparator()
@@ -43,12 +44,14 @@ function onOpen() {
 }
 
 function doGet(e) {
+  var startedAt = new Date();
+  var requestId = generateRunId();
   if (e && e.parameter && String(e.parameter.format || '').toLowerCase() === 'json') {
-    return jsonResponse_({
+    return jsonResponse_(withApiResponseMetadata_({
       status: 'OK',
       service: 'BMRX Productivity Reporting Engine',
       timestamp: formatDateTime_(new Date())
-    });
+    }, requestId, 'doGet.health', startedAt, { format: 'json' }));
   }
 
   return HtmlService
@@ -59,19 +62,26 @@ function doGet(e) {
 }
 
 function dashboardHealth() {
-  return jsonResponse_({
+  var startedAt = new Date();
+  var requestId = generateRunId();
+  return jsonResponse_(withApiResponseMetadata_({
     status: 'OK',
     service: 'BMRX Productivity Reporting Engine',
     timestamp: formatDateTime_(new Date())
-  });
+  }, requestId, 'dashboardHealth', startedAt, { format: 'json' }));
 }
 
 function doPost(e) {
+  var startedAt = new Date();
+  var requestId = generateRunId();
+  var payload = {};
+  var action = '';
+
   try {
-    var payload = parsePostPayload_(e);
+    payload = parsePostPayload_(e);
+    action = String(payload.action || '');
     authorizeInternalRequest_(payload);
 
-    var action = payload.action;
     var result;
 
     if (action === 'setupProject') {
@@ -146,6 +156,8 @@ function doPost(e) {
       result = manualVerifyDashboardDeploymentReadiness();
     } else if (action === 'testGeminiDashboardInsight') {
       result = manualTestGeminiDashboardInsight();
+    } else if (action === 'testDashboardMiddlewareAndCache') {
+      result = manualTestDashboardMiddlewareAndCache();
     } else if (action === 'dashboardHardRefresh') {
       result = startDashboardHardRefresh(payload.request || payload);
     } else if (action === 'dashboardSyncStatus') {
@@ -174,10 +186,21 @@ function doPost(e) {
       throw new Error('Unsupported action: ' + action);
     }
 
-    return jsonResponse_({ status: 'OK', result: result });
+    return jsonResponse_(withApiResponseMetadata_({
+      status: 'OK',
+      result: result
+    }, requestId, 'doPost.' + (action || 'unknown'), startedAt, payload, {
+      logAlways: action === 'dashboardHardRefresh'
+    }));
   } catch (error) {
+    var endpointName = 'doPost.' + (action || 'unknown');
+    var failure = buildApiErrorPayload_(error, requestId, endpointName, startedAt);
+    logApiEvent_(endpointName, requestId, startedAt, sanitizeApiPayload_(payload), failure, {
+      status: 'FAILED',
+      logAlways: true
+    });
     logError('doPost', error, 'FAILED', 0);
-    return jsonResponse_({ status: 'ERROR', message: error.message });
+    return jsonResponse_(failure);
   }
 }
 

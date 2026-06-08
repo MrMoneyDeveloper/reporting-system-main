@@ -11,7 +11,7 @@ const JSON_HEADERS = {
 };
 
 const SHIFT_ORDER = ['Day', 'Mid', 'Night'];
-const DEFAULT_APPS_SCRIPT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx4mTPIf5scRTAC0dxxJO3SgInmlYfWagZP8-ye2s4O/exec';
+const DEFAULT_APPS_SCRIPT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxRhff21JVjkpDbXQg3jSBn_UzYYIMeAwpNBb8k0iiRQOJyRCqhnPXml5mONlGYZeOEQA/exec';
 const DEFAULT_DASHBOARD_API_TOKEN = 'cx-dashboard-api-20260608-46f64a04b4044e8d';
 
 export async function onRequest(context) {

@@ -12,7 +12,7 @@ Build order:
 2. Apps Script automation engine
 3. Excel and email reporting
 4. AI summary layer
-5. Cloudflare dashboard
+5. Cloudflare Pages gateway
 
 ## 2. Architecture Summary
 
@@ -26,10 +26,10 @@ Local project
   -> Zendesk/WFM/attendance data is normalized
   -> Excel reports are generated and saved to Drive
   -> Gmail sends management reports
-  -> Cloudflare can read/download reports later
+  -> Cloudflare Pages provides a clean pages.dev URL for the Apps Script dashboard gateway
 ```
 
-The local-control-app is only a future developer control panel. It is not the production backend.
+The `local-control-app` folder is now a deployable Cloudflare Pages frontend. It is a gateway to the Apps Script dashboard, not the production backend.
 
 ## 3. Required Tools
 
@@ -87,32 +87,13 @@ npm run clasp:login
 ZENDESK_SUBDOMAIN
 ZENDESK_EMAIL
 ZENDESK_API_TOKEN
-WFM_API_KEY
-WFM_REPORT_TEMPLATE_ID
-AI_API_KEY
+GROQ_API_KEY
+AI_PROVIDER
 AI_MODEL
 INTERNAL_API_SECRET
 SPREADSHEET_ID
 REPORT_OUTPUT_FOLDER_ID
 ATTENDANCE_SPREADSHEET_ID
-```
-
-For the current Zendesk WFM report URL:
-
-```text
-https://cxsupporthub.zendesk.com/wfm/v2/reports/d3729142-32d3-4042-9d2f-5bcc578b5cf8/display
-```
-
-Use this Script Property:
-
-```text
-WFM_REPORT_TEMPLATE_ID = d3729142-32d3-4042-9d2f-5bcc578b5cf8
-```
-
-`WFM_BASE_URL` is optional. If omitted, the script derives it from `ZENDESK_SUBDOMAIN` as:
-
-```text
-https://cxsupporthub.zendesk.com/wfm/public/api
 ```
 
 The sample WFM CSV export supplied for this project has these columns:
@@ -126,7 +107,7 @@ Unpaid General Task time
 Total time
 ```
 
-The mapper supports those labels. This export is period-level, so it can populate total logged time and general task time by agent. It does not contain date, shift, productive time, or unproductive time columns. Keep `WFM_INFER_PRODUCTIVE_FROM_TOTAL_MINUS_GENERAL` set to `FALSE` unless operations confirms that `Total time - Unpaid General Task time` should be treated as productive time.
+The mapper supports those labels. This export is period-level, so it populates monthly WFM balance metrics only. It is not spread into fake daily WFM rows.
 
 For the external attendance workbook, use:
 
@@ -156,7 +137,7 @@ createTriggers()
 
 ## 5. Security Notes
 
-Do not store secrets in Google Sheet cells, Git, `projects.json`, frontend code, or local-control-app code.
+Do not store secrets in Google Sheet cells, Git, `projects.json`, frontend code, or `local-control-app` code.
 
 Secrets must live in Apps Script Script Properties only.
 
@@ -300,14 +281,28 @@ Use `doPost(e)` only for internal developer/control calls protected by `INTERNAL
 
 ## 10. Future Cloudflare Dashboard Plan
 
-Cloudflare comes after the reporting pipeline works.
+Cloudflare Pages is now available as a frontend gateway in `local-control-app`.
 
-Planned stack:
+Use these Cloudflare Pages settings:
 
-- React frontend on Cloudflare Pages
-- Cloudflare Worker API
-- Google Drive or Google Sheets as report/data source
-- Protected access
-- Report list, filters, and Excel downloads
+| Setting | Value |
+| --- | --- |
+| Framework preset | React / Vite |
+| Root directory | `local-control-app` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Production branch | `main` |
 
-The dashboard should read generated reports and normalized data. It should not replace Apps Script as the reporting backend.
+Cloudflare gives a free URL such as:
+
+```text
+https://reporting-system-main.pages.dev
+```
+
+Set this optional Cloudflare environment variable:
+
+```text
+VITE_APPS_SCRIPT_WEB_APP_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
+```
+
+The Cloudflare frontend should not contain Zendesk, Groq, Google, or Apps Script secrets. Secrets stay in Apps Script Script Properties. Apps Script remains the production backend and Google Sheets remains the data warehouse.

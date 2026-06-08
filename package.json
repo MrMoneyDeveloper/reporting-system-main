@@ -8,6 +8,9 @@
     "clasp:push": "clasp push",
     "clasp:pull": "clasp pull",
     "clasp:deploy": "clasp deploy",
-    "clasp:open": "clasp open"
+    "clasp:open": "clasp open",
+    "pages:install": "npm --prefix local-control-app install",
+    "pages:build": "npm --prefix local-control-app run build",
+    "pages:preview": "npm --prefix local-control-app run preview"
   }
 }

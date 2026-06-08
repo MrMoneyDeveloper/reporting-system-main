@@ -95,7 +95,7 @@ function getDashboardInsight(request) {
   }
 
   if (!getAiApiKey_().value) {
-    return { status: 'SUCCESS', insight: fallback + '\nAI_API_KEY or GEMINI_API_KEY is not configured, so this fallback insight was used.', fallback: true };
+    return { status: 'SUCCESS', insight: fallback + '\nAI API key is not configured, so this fallback insight was used.', fallback: true };
   }
 
   var prompt = [
@@ -108,7 +108,7 @@ function getDashboardInsight(request) {
   try {
     return {
       status: 'SUCCESS',
-      insight: callGeminiGenerateContent_(prompt, {
+      insight: callAiGenerateContent_(prompt, {
         model: getAiModel_(),
         temperature: 0.2,
         maxOutputTokens: 900
@@ -117,7 +117,7 @@ function getDashboardInsight(request) {
     };
   } catch (error) {
     logError('getDashboardInsight', error, 'CONTINUED', 0);
-    return { status: 'SUCCESS', insight: fallback + '\nGemini call failed: ' + error.message, fallback: true };
+    return { status: 'SUCCESS', insight: fallback + '\nAI provider call failed: ' + error.message, fallback: true };
   }
 }
 
@@ -210,12 +210,16 @@ function buildDashboardSyncStatus_() {
 }
 
 function testGeminiDashboardInsight_() {
+  return testAiDashboardInsight_();
+}
+
+function testAiDashboardInsight_() {
   var result = getDashboardInsight({
     periodType: 'monthly'
   });
   logPipelineEvent_({
     reportType: 'Dashboard Diagnostic',
-    phase: 'gemini',
+    phase: 'ai-insight',
     status: result.fallback ? 'FALLBACK' : 'SUCCESS',
     message: compactLogMessage_(result.insight || ''),
     rowsProcessed: 1
@@ -235,10 +239,11 @@ function verifyDashboardDeploymentReadiness_() {
       monthlyMetrics: getSheetData(SHEET_NAMES.MONTHLY_METRICS).length,
       currentReportView: getSheetData(SHEET_NAMES.CURRENT_REPORT_VIEW).length
     },
-    gemini: {
+    ai: {
+      provider: getAiProvider_(),
       apiKeyPresent: Boolean(getAiApiKey_().value),
       model: getAiModel_(),
-      diagnostic: getGeminiDiagnostic_()
+      diagnostic: getAiDiagnostic_()
     },
     webApp: {
       htmlTemplate: 'Dashboard',

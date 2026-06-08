@@ -72,9 +72,9 @@ function generateAiSummary(payload) {
     return 'AI summary disabled in Config.';
   }
 
-  var apiKey = getAiApiKey_().value;
-  if (!apiKey) {
-    logError('generateAiSummary', new Error('AI_API_KEY Script Property is not configured; using fallback summary.'), 'SKIPPED', 0);
+  var apiKeyInfo = getAiApiKey_();
+  if (!apiKeyInfo.value) {
+    logError('generateAiSummary', new Error(getAiProvider_() + ' API key Script Property is not configured; using fallback summary.'), 'SKIPPED', 0);
     return buildFallbackAiSummary_(payload);
   }
 
@@ -87,21 +87,83 @@ function generateAiSummary(payload) {
   ].join('\n\n');
 
   try {
-    return callGeminiGenerateContent_(prompt, {
+    return callAiGenerateContent_(prompt, {
       model: model,
       temperature: 0.2,
       maxOutputTokens: 700
     });
   } catch (error) {
-    logError('generateAiSummary_gemini', error, 'CONTINUED', 0);
-    return buildFallbackAiSummary_(payload) + '\nAI model configured but Gemini call failed: ' + error.message;
+    logError('generateAiSummary_ai', error, 'CONTINUED', 0);
+    return buildFallbackAiSummary_(payload) + '\nAI model configured but provider call failed: ' + error.message;
   }
 }
 
 function callGeminiGenerateContent_(prompt, options) {
+  return callAiGenerateContent_(prompt, options);
+}
+
+function callAiGenerateContent_(prompt, options) {
+  var provider = getAiProvider_();
+  if (provider === 'GEMINI') {
+    return callGeminiGenerateContentProvider_(prompt, options);
+  }
+  return callGroqChatCompletion_(prompt, options);
+}
+
+function callGroqChatCompletion_(prompt, options) {
   var apiKeyInfo = getAiApiKey_();
   if (!apiKeyInfo.value) {
-    throw new Error('AI_API_KEY or GEMINI_API_KEY is not configured.');
+    throw new Error('GROQ_API_KEY or AI_API_KEY is not configured.');
+  }
+
+  var opts = options || {};
+  var model = normalizeGroqModelName_(opts.model || getAiModel_());
+  var url = 'https://api.groq.com/openai/v1/chat/completions';
+  var payload = {
+    model: model,
+    messages: [
+      {
+        role: 'system',
+        content: 'You write concise operational insights from compact aggregate data. Do not invent facts.'
+      },
+      {
+        role: 'user',
+        content: String(prompt || '')
+      }
+    ],
+    temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.2,
+    max_completion_tokens: opts.maxOutputTokens || opts.maxTokens || 800
+  };
+
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      Authorization: 'Bearer ' + apiKeyInfo.value
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  var statusCode = response.getResponseCode();
+  var body = response.getContentText();
+
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error('Groq API returned HTTP ' + statusCode + ': ' + compactLogMessage_(body));
+  }
+
+  var parsed = JSON.parse(body);
+  var choices = parsed.choices || [];
+  if (!choices.length || !choices[0].message || !choices[0].message.content) {
+    throw new Error('Groq API returned no text choices.');
+  }
+
+  return String(choices[0].message.content || '').trim();
+}
+
+function callGeminiGenerateContentProvider_(prompt, options) {
+  var apiKeyInfo = getAiApiKey_();
+  if (!apiKeyInfo.value) {
+    throw new Error('GEMINI_API_KEY or AI_API_KEY is not configured.');
   }
 
   var opts = options || {};
@@ -156,7 +218,10 @@ function callGeminiGenerateContent_(prompt, options) {
 }
 
 function getAiApiKey_() {
+  var provider = getAiProvider_();
   var sources = [
+    { name: 'Script Property GROQ_API_KEY', provider: 'GROQ', value: getScriptProperty_('GROQ_API_KEY') },
+    { name: 'Config GROQ_API_KEY', provider: 'GROQ', value: getConfigValue('GROQ_API_KEY', '') },
     { name: 'Script Property AI_API_KEY', value: getScriptProperty_('AI_API_KEY') },
     { name: 'Script Property GEMINI_API_KEY', value: getScriptProperty_('GEMINI_API_KEY') },
     { name: 'Config AI_API_KEY', value: getConfigValue('AI_API_KEY', '') },
@@ -164,10 +229,17 @@ function getAiApiKey_() {
   ];
 
   for (var i = 0; i < sources.length; i++) {
+    if (sources[i].provider && sources[i].provider !== provider) {
+      continue;
+    }
     var normalized = normalizeSecretValue_(sources[i].value);
+    if (provider === 'GROQ' && !sources[i].provider && normalized && !isGroqApiKeyCandidate_(normalized)) {
+      continue;
+    }
     if (normalized) {
       return {
         source: sources[i].name,
+        provider: provider,
         value: normalized,
         masked: maskApiKey_(normalized),
         length: normalized.length,
@@ -178,11 +250,16 @@ function getAiApiKey_() {
 
   return {
     source: '',
+    provider: provider,
     value: '',
     masked: '',
     length: 0,
     hasWhitespaceTrimmed: false
   };
+}
+
+function isGroqApiKeyCandidate_(value) {
+  return /^gsk_/i.test(String(value || '').trim());
 }
 
 function normalizeSecretValue_(value) {
@@ -206,21 +283,34 @@ function maskApiKey_(value) {
 }
 
 function getGeminiDiagnostic_() {
+  return getAiDiagnostic_();
+}
+
+function getAiDiagnostic_() {
+  var provider = getAiProvider_();
   var apiKeyInfo = getAiApiKey_();
-  var model = normalizeGeminiModelName_(getAiModel_());
+  var model = provider === 'GEMINI' ? normalizeGeminiModelName_(getAiModel_()) : normalizeGroqModelName_(getAiModel_());
+  var endpoint = provider === 'GEMINI'
+    ? 'https://generativelanguage.googleapis.com/v1beta/' + model + ':generateContent'
+    : 'https://api.groq.com/openai/v1/chat/completions';
   return {
     status: apiKeyInfo.value ? 'CONFIGURED' : 'MISSING_KEY',
+    provider: provider,
     keySource: apiKeyInfo.source,
     keyMasked: apiKeyInfo.masked,
     keyLength: apiKeyInfo.length,
     keyWhitespaceOrQuotesTrimmed: apiKeyInfo.hasWhitespaceTrimmed,
     model: model,
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/' + model + ':generateContent'
+    endpoint: endpoint
   };
 }
 
 function testGeminiConfig_() {
-  var diagnostic = getGeminiDiagnostic_();
+  return testAiConfig_();
+}
+
+function testAiConfig_() {
+  var diagnostic = getAiDiagnostic_();
   var result = {
     status: diagnostic.status,
     diagnostic: diagnostic,
@@ -229,17 +319,17 @@ function testGeminiConfig_() {
 
   if (diagnostic.status !== 'CONFIGURED') {
     logPipelineEvent_({
-      reportType: 'Gemini Diagnostic',
-      phase: 'gemini-config',
+      reportType: 'AI Diagnostic',
+      phase: 'ai-config',
       status: 'MISSING_KEY',
-      message: 'Gemini key is missing. Configure AI_API_KEY or GEMINI_API_KEY in Script Properties.',
+      message: diagnostic.provider + ' key is missing. Configure GROQ_API_KEY or AI_API_KEY in Script Properties.',
       rowsProcessed: 0
     });
     return result;
   }
 
   try {
-    result.testText = callGeminiGenerateContent_('Reply with exactly: OK', {
+    result.testText = callAiGenerateContent_('Reply with exactly: OK', {
       model: getAiModel_(),
       temperature: 0,
       maxOutputTokens: 20
@@ -251,14 +341,44 @@ function testGeminiConfig_() {
   }
 
   logPipelineEvent_({
-    reportType: 'Gemini Diagnostic',
-    phase: 'gemini-config',
+    reportType: 'AI Diagnostic',
+    phase: 'ai-config',
     status: result.status,
-    message: 'Gemini diagnostic: source=' + diagnostic.keySource + ', key=' + diagnostic.keyMasked + ', length=' + diagnostic.keyLength + ', model=' + diagnostic.model + (result.message ? ', message=' + result.message : ''),
+    message: 'AI diagnostic: provider=' + diagnostic.provider + ', source=' + diagnostic.keySource + ', key=' + diagnostic.keyMasked + ', length=' + diagnostic.keyLength + ', model=' + diagnostic.model + (result.message ? ', message=' + result.message : ''),
     rowsProcessed: 1
   });
 
   return result;
+}
+
+function switchAiProviderToGroq_() {
+  var properties = PropertiesService.getScriptProperties();
+  properties.setProperty('AI_PROVIDER', 'GROQ');
+
+  var currentModel = normalizeSecretValue_(properties.getProperty('AI_MODEL'));
+  if (!currentModel || /^models\/?gemini/i.test(currentModel) || /^gemini/i.test(currentModel)) {
+    properties.setProperty('AI_MODEL', DEFAULT_AI_MODEL);
+  }
+
+  setConfigValue_('AI_PROVIDER', 'GROQ', 'AI provider for dashboard/report insight. Supported: GROQ, GEMINI');
+  setConfigValue_('AI_MODEL', DEFAULT_AI_MODEL, 'AI model used for dashboard/report insight');
+  invalidateConfigCache_();
+
+  var diagnostic = getAiDiagnostic_();
+  logPipelineEvent_({
+    reportType: 'AI Diagnostic',
+    phase: 'ai-provider',
+    status: 'GROQ',
+    message: 'AI provider switched to GROQ. model=' + diagnostic.model + ', keySource=' + (diagnostic.keySource || 'missing') + ', key=' + (diagnostic.keyMasked || 'missing') + '.',
+    rowsProcessed: 1
+  });
+
+  return {
+    status: 'SUCCESS',
+    provider: 'GROQ',
+    model: getAiModel_(),
+    diagnostic: diagnostic
+  };
 }
 
 function normalizeGeminiModelName_(model) {
@@ -267,6 +387,17 @@ function normalizeGeminiModelName_(model) {
     return value;
   }
   return 'models/' + value;
+}
+
+function normalizeGroqModelName_(model) {
+  var value = String(model || DEFAULT_AI_MODEL).trim();
+  if (value.indexOf('models/') === 0) {
+    value = value.replace(/^models\//, '');
+  }
+  if (!value || /^gemini/i.test(value)) {
+    return DEFAULT_AI_MODEL;
+  }
+  return value;
 }
 
 function buildFallbackAiSummary_(payload) {

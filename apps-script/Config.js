@@ -1,7 +1,8 @@
 var DEFAULT_TIMEZONE = 'Africa/Johannesburg';
 var DEFAULT_PROJECT_SPREADSHEET_ID = '1WE1MrG0TJ9rEA3nRVEMGF-lpakzLqTUSeSG05b8RN7Y';
 var DEFAULT_ATTENDANCE_SPREADSHEET_ID = '1b0C-xRp3OO0f3HeHAt6n6Nr3u2tpFA72o7ertA8VxQI';
-var DEFAULT_AI_MODEL = 'gemini-2.5-flash';
+var DEFAULT_AI_PROVIDER = 'GROQ';
+var DEFAULT_AI_MODEL = 'llama-3.3-70b-versatile';
 var CONFIG_CACHE_ = null;
 
 var DEFAULT_CONFIG_ROWS = Object.freeze([
@@ -10,6 +11,8 @@ var DEFAULT_CONFIG_ROWS = Object.freeze([
   ['MONTHLY_REPORT_ENABLED', 'TRUE', 'Turn monthly email on or off'],
   ['SITE_SYNC_ENABLED', 'FALSE', 'Reserved for the future Cloudflare dashboard'],
   ['AI_SUMMARY_ENABLED', 'TRUE', 'Turn AI-generated summaries on or off'],
+  ['AI_PROVIDER', 'GROQ', 'AI provider for dashboard/report insight. Supported: GROQ, GEMINI'],
+  ['AI_MODEL', 'llama-3.3-70b-versatile', 'AI model used for dashboard/report insight'],
   ['TIMEZONE', 'Africa/Johannesburg', 'Reporting timezone'],
   ['WEEK_CUTOFF_DAY', 'Sunday', 'Weeks close on Sunday and weekly reports run Monday morning'],
   ['DAILY_REPORT_SEND_TIME', '08:10', 'Send after the night shift closes'],
@@ -48,7 +51,7 @@ var DEFAULT_CONFIG_ROWS = Object.freeze([
   ['ANALYTICS_MAX_RUNTIME_SECONDS', '240', 'Soft runtime cap for one analytics rebuild execution'],
   ['ANALYTICS_CONTINUATION_DELAY_SECONDS', '60', 'Delay before the next analytics rebuild continuation trigger'],
   ['DASHBOARD_CACHE_TTL_SECONDS', '300', 'How long dashboard bootstrap and metric payloads stay cached'],
-  ['DASHBOARD_INSIGHT_CACHE_TTL_SECONDS', '900', 'How long Gemini dashboard insight responses stay cached'],
+  ['DASHBOARD_INSIGHT_CACHE_TTL_SECONDS', '900', 'How long AI dashboard insight responses stay cached'],
   ['DASHBOARD_CACHE_MAX_BYTES', '90000', 'Maximum dashboard cache payload size before skipping cache storage'],
   ['DASHBOARD_API_LOG_MODE', 'SUMMARY', 'SUMMARY logs cache misses, slow calls, errors, and hard refreshes; VERBOSE logs all dashboard API calls'],
   ['DASHBOARD_SLOW_REQUEST_MS', '5000', 'Dashboard API calls slower than this are logged to Pipeline Log'],
@@ -238,7 +241,30 @@ function getAttendanceSpreadsheetId_() {
 }
 
 function getAiModel_() {
-  return getScriptProperty_('AI_MODEL') || DEFAULT_AI_MODEL;
+  var provider = getAiProvider_();
+  var configured = normalizeSecretValue_(getScriptProperty_('AI_MODEL') || getConfigValue('AI_MODEL', ''));
+
+  if (provider === 'GROQ') {
+    if (!configured || /^models\/?gemini/i.test(configured) || /^gemini/i.test(configured)) {
+      return DEFAULT_AI_MODEL;
+    }
+    return configured;
+  }
+
+  if (provider === 'GEMINI') {
+    return configured || 'gemini-2.5-flash';
+  }
+
+  return configured || DEFAULT_AI_MODEL;
+}
+
+function getAiProvider_() {
+  var value = normalizeSecretValue_(getScriptProperty_('AI_PROVIDER') || getConfigValue('AI_PROVIDER', DEFAULT_AI_PROVIDER));
+  value = String(value || DEFAULT_AI_PROVIDER).toUpperCase();
+  if (value !== 'GROQ' && value !== 'GEMINI') {
+    return DEFAULT_AI_PROVIDER;
+  }
+  return value;
 }
 
 function validateScriptProperties() {
@@ -275,6 +301,7 @@ function seedKnownScriptProperties_() {
 
   setScriptPropertyIfMissing_(properties, configured, 'SPREADSHEET_ID', spreadsheetId);
   setScriptPropertyIfMissing_(properties, configured, 'ATTENDANCE_SPREADSHEET_ID', DEFAULT_ATTENDANCE_SPREADSHEET_ID);
+  setScriptPropertyIfMissing_(properties, configured, 'AI_PROVIDER', DEFAULT_AI_PROVIDER);
   setScriptPropertyIfMissing_(properties, configured, 'AI_MODEL', DEFAULT_AI_MODEL);
   setScriptPropertyIfMissing_(properties, configured, 'INTERNAL_API_SECRET', Utilities.getUuid());
 
@@ -339,6 +366,16 @@ function upgradeDefaultConfigValues_() {
       oldValues: { '': true, API: true, EMAIL_EXPORT: true },
       newValue: 'MANUAL_MONTHLY',
       notes: 'WFM source mode. Manual monthly WFM upload is the active workflow'
+    },
+    AI_PROVIDER: {
+      oldValues: { '': true, GEMINI: true },
+      newValue: 'GROQ',
+      notes: 'AI provider for dashboard/report insight. Supported: GROQ, GEMINI'
+    },
+    AI_MODEL: {
+      oldValues: { '': true, 'gemini-2.5-flash': true, 'models/gemini-2.5-flash': true },
+      newValue: DEFAULT_AI_MODEL,
+      notes: 'AI model used for dashboard/report insight'
     }
   };
   var sheet = ensureSheet(SHEET_NAMES.CONFIG, SHEET_HEADERS[SHEET_NAMES.CONFIG]);

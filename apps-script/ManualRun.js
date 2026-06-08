@@ -99,11 +99,23 @@ function manualRefreshCurrentAnalytics() {
 }
 
 function manualTestGeminiDashboardInsight() {
-  return testGeminiDashboardInsight_();
+  return testAiDashboardInsight_();
 }
 
 function manualTestGeminiConfig() {
-  return testGeminiConfig_();
+  return testAiConfig_();
+}
+
+function manualTestAiDashboardInsight() {
+  return testAiDashboardInsight_();
+}
+
+function manualTestAiConfig() {
+  return testAiConfig_();
+}
+
+function manualSwitchAiProviderToGroq() {
+  return switchAiProviderToGroq_();
 }
 
 function manualVerifyDashboardDeploymentReadiness() {

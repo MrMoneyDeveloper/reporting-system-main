@@ -34,8 +34,9 @@ function onOpen() {
     .addItem('Clean Up Retired Tabs', 'manualCleanUpRetiredWorkbook')
     .addItem('Inspect Attendance Source', 'manualInspectAttendanceSource')
     .addItem('Repair Raw Attendance From Source', 'manualRepairRawAttendanceFromSource')
-    .addItem('Test Gemini Config', 'manualTestGeminiConfig')
-    .addItem('Test Gemini Dashboard Insight', 'manualTestGeminiDashboardInsight')
+    .addItem('Switch AI Provider To Groq', 'manualSwitchAiProviderToGroq')
+    .addItem('Test AI / Groq Config', 'manualTestAiConfig')
+    .addItem('Test AI Dashboard Insight', 'manualTestAiDashboardInsight')
     .addSeparator()
     .addItem('Clean Duplicate Projects', 'trashDuplicateAppsScriptProjects')
     .addSeparator()
@@ -159,6 +160,12 @@ function doPost(e) {
       result = manualTestGeminiDashboardInsight();
     } else if (action === 'testGeminiConfig') {
       result = manualTestGeminiConfig();
+    } else if (action === 'testAiDashboardInsight') {
+      result = manualTestAiDashboardInsight();
+    } else if (action === 'testAiConfig') {
+      result = manualTestAiConfig();
+    } else if (action === 'switchAiProviderToGroq') {
+      result = manualSwitchAiProviderToGroq();
     } else if (action === 'testDashboardMiddlewareAndCache') {
       result = manualTestDashboardMiddlewareAndCache();
     } else if (action === 'dashboardHardRefresh') {

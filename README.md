@@ -12,7 +12,7 @@ Build order:
 2. Apps Script automation engine
 3. Excel and email reporting
 4. AI summary layer
-5. Cloudflare Pages gateway
+5. Cloudflare Pages dashboard
 
 ## 2. Architecture Summary
 
@@ -26,10 +26,10 @@ Local project
   -> Zendesk/WFM/attendance data is normalized
   -> Excel reports are generated and saved to Drive
   -> Gmail sends management reports
-  -> Cloudflare Pages provides a clean pages.dev URL for the Apps Script dashboard gateway
+  -> Cloudflare Pages provides the React dashboard and a server-side API proxy to Apps Script
 ```
 
-The `local-control-app` folder is now a deployable Cloudflare Pages frontend. It is a gateway to the Apps Script dashboard, not the production backend.
+The `local-control-app` folder is now a deployable Cloudflare Pages frontend. It is the public dashboard shell and API proxy. Apps Script remains the production backend.
 
 ## 3. Required Tools
 
@@ -279,15 +279,15 @@ npm run clasp:deploy
 
 Use `doPost(e)` only for internal developer/control calls protected by `INTERNAL_API_SECRET`.
 
-## 10. Future Cloudflare Dashboard Plan
+## 10. Cloudflare Dashboard
 
-Cloudflare Pages is now available as a frontend gateway in `local-control-app`.
+Cloudflare Pages is available as a React dashboard in `local-control-app`.
 
 Use these Cloudflare Pages settings:
 
 | Setting | Value |
 | --- | --- |
-| Framework preset | React / Vite |
+| Framework preset | None is OK, or React / Vite |
 | Root directory | `local-control-app` |
 | Build command | `npm run build` |
 | Build output directory | `dist` |
@@ -299,10 +299,13 @@ Cloudflare gives a free URL such as:
 https://reporting-system-main.pages.dev
 ```
 
-Set this optional Cloudflare environment variable:
+Set these required Cloudflare Pages environment variables:
 
 ```text
-VITE_APPS_SCRIPT_WEB_APP_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
+APPS_SCRIPT_WEB_APP_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
+INTERNAL_API_SECRET=the same value as Apps Script Script Property INTERNAL_API_SECRET
 ```
 
-The Cloudflare frontend should not contain Zendesk, Groq, Google, or Apps Script secrets. Secrets stay in Apps Script Script Properties. Apps Script remains the production backend and Google Sheets remains the data warehouse.
+The browser calls same-origin routes like `/api/bootstrap`, `/api/metrics`, `/api/insight`, `/api/hard-refresh`, `/api/sync-status`, and `/api/export.csv`. A Cloudflare Pages Function forwards those requests to Apps Script using the internal secret.
+
+The Cloudflare frontend should not contain Zendesk, Groq, Google, or Apps Script secrets. Secrets stay in Apps Script Script Properties and Cloudflare Pages environment variables. Apps Script remains the production backend and Google Sheets remains the data warehouse.

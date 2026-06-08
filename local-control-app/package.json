@@ -2,7 +2,7 @@
   "name": "reporting-cloudflare-dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloudflare Pages gateway for the Apps Script productivity reporting dashboard.",
+  "description": "Cloudflare Pages dashboard for the Apps Script productivity reporting system.",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -171,6 +171,12 @@ function doPost(e) {
       result = manualSwitchAiProviderToGroq();
     } else if (action === 'testDashboardMiddlewareAndCache') {
       result = manualTestDashboardMiddlewareAndCache();
+    } else if (action === 'dashboardBootstrap') {
+      result = getDashboardBootstrapCached();
+    } else if (action === 'dashboardMetrics') {
+      result = getDashboardMetricsCached(payload.request || payload);
+    } else if (action === 'dashboardInsight') {
+      result = getDashboardInsightCached(payload.request || payload);
     } else if (action === 'dashboardHardRefresh') {
       result = startDashboardHardRefresh(payload.request || payload);
     } else if (action === 'dashboardSyncStatus') {

@@ -43,7 +43,8 @@ var DEFAULT_AGENT_ROSTER = Object.freeze([
   { name: 'Tokoza Bangani', email: 'tokoza.bangani.digifycx@gmail.com', shift: 'Night', team: 'Marketing' },
   { name: 'Alrique Usher', email: 'alrique.usher.digifycx@gmail.com', shift: 'Day', team: 'Zendesk' },
   { name: 'Nomfundo Mtiyane', email: 'nomfundo.mtiyane.digifycx@gmail.com', shift: 'Day', team: 'Zendesk' },
-  { name: 'Sbahle Ngidi', email: 'sbahle.ngidi.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' }
+  { name: 'Sbahle Ngidi', email: 'sbahle.ngidi.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' },
+  { name: 'Nothando Shangase', email: 'nothando.shangase.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' }
 ]);
 var ACTIVE_AGENTS_CACHE_ = null;
 var AGENT_EMAIL_MAP_CACHE_ = null;

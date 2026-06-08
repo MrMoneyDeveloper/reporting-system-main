@@ -285,7 +285,13 @@ function isOpenTicketNoteRow_(row) {
   return Boolean(
     commentText ||
     actionDescription.indexOf('internal note') !== -1 ||
+    actionDescription.indexOf('private note') !== -1 ||
+    actionDescription.indexOf('note added') !== -1 ||
+    actionDescription.indexOf('added note') !== -1 ||
     actionDescription.indexOf('public customer reply') !== -1 ||
+    actionDescription.indexOf('public reply') !== -1 ||
+    eventType.indexOf('internal note') !== -1 ||
+    eventType.indexOf('private note') !== -1 ||
     eventType.indexOf('customer reply') !== -1 ||
     eventType.indexOf('public reply') !== -1
   );

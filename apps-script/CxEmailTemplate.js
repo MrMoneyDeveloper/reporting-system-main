@@ -6,11 +6,14 @@ function CX_buildReportEmailModel_(reportType, reportWindow, aiSummary, finalRow
 
   return {
     reportTitle: title,
-    reportDate: reportWindow && reportWindow.startDate ? Utilities.formatDate(reportWindow.startDate, getReportTimezone_(), 'yyyy-MM-dd') : Utilities.formatDate(new Date(), getReportTimezone_(), 'yyyy-MM-dd'),
+    reportDate: CX_reportForLabel_(type, reportWindow),
+    reportFor: CX_reportForLabel_(type, reportWindow),
+    dataWindow: CX_dataWindowLabel_(reportWindow),
+    sentAt: formatDateTime_(new Date()),
     reportPeriod: reportWindow && reportWindow.periodLabel ? reportWindow.periodLabel : CX_titleCase_(type),
     timezone: getReportTimezone_(),
-    summary: CX_buildReportSummary_(aiSummary, rows, totals),
-    metrics: CX_buildReportMetrics_(totals),
+    summary: CX_buildReportSummary_(aiSummary, rows, totals, type),
+    metrics: CX_buildReportMetrics_(totals, type),
     sections: CX_buildReportSections_(rows, type),
     reportLink: reportLink || '',
     companyWebsite: getConfigValue('CX_COMPANY_WEBSITE', 'https://www.cxexperts.co.za/'),
@@ -24,6 +27,9 @@ function CX_buildSampleEmailReport_() {
   return {
     reportTitle: 'AI Ticket Summary Report',
     reportDate: Utilities.formatDate(new Date(), getReportTimezone_(), 'yyyy-MM-dd'),
+    reportFor: Utilities.formatDate(new Date(), getReportTimezone_(), 'yyyy-MM-dd'),
+    dataWindow: 'Template Test',
+    sentAt: formatDateTime_(new Date()),
     reportPeriod: 'Template Test',
     timezone: getReportTimezone_(),
     summary: {
@@ -110,7 +116,9 @@ function CX_buildAiReportEmailHtml_(report) {
   report = report || {};
 
   var title = report.reportTitle || 'AI Summary Report';
-  var reportDate = report.reportDate || '';
+  var reportFor = report.reportFor || report.reportDate || '';
+  var dataWindow = report.dataWindow || report.reportPeriod || '';
+  var sentAt = report.sentAt || formatDateTime_(new Date());
   var reportPeriod = report.reportPeriod || 'Daily';
   var timezone = report.timezone || 'Africa/Johannesburg';
   var html = '';
@@ -121,7 +129,7 @@ function CX_buildAiReportEmailHtml_(report) {
   html += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f1f8;width:100%;margin:0;padding:0;">';
   html += '<tr><td align="center" style="padding:16px;">';
   html += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:980px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e1eb;">';
-  html += CX_buildHeaderHtml_(title, reportDate, reportPeriod, timezone);
+  html += CX_buildHeaderHtml_(title, reportFor, dataWindow, sentAt, timezone);
   html += CX_buildSummaryHtml_(report.summary || {});
   html += CX_buildMetricsHtml_(report.metrics || []);
   html += CX_buildSectionsHtml_(report.sections || []);
@@ -136,7 +144,7 @@ function CX_buildAiReportEmailHtml_(report) {
   return html;
 }
 
-function CX_buildHeaderHtml_(title, reportDate, reportPeriod, timezone) {
+function CX_buildHeaderHtml_(title, reportFor, dataWindow, sentAt, timezone) {
   var html = '';
 
   html += '<tr><td style="background:#4b1d78;color:#ffffff;padding:24px;">';
@@ -144,8 +152,9 @@ function CX_buildHeaderHtml_(title, reportDate, reportPeriod, timezone) {
   html += '<td style="vertical-align:middle;">';
   html += '<div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;opacity:0.9;">CX Experts Reporting</div>';
   html += '<div style="font-size:26px;font-weight:bold;line-height:1.25;margin-top:8px;">' + CX_escapeHtml_(title) + '</div>';
-  html += '<div style="font-size:14px;line-height:1.6;margin-top:10px;">Report Date: <strong>' + CX_escapeHtml_(reportDate) + '</strong></div>';
-  html += '<div style="font-size:14px;line-height:1.6;">Period: <strong>' + CX_escapeHtml_(reportPeriod) + '</strong></div>';
+  html += '<div style="font-size:14px;line-height:1.6;margin-top:10px;">Report For: <strong>' + CX_escapeHtml_(reportFor) + '</strong></div>';
+  html += '<div style="font-size:14px;line-height:1.6;">Data Window: <strong>' + CX_escapeHtml_(dataWindow) + '</strong></div>';
+  html += '<div style="font-size:14px;line-height:1.6;">Sent At: <strong>' + CX_escapeHtml_(sentAt) + '</strong></div>';
   html += '<div style="font-size:13px;line-height:1.6;opacity:0.95;">Timezone: ' + CX_escapeHtml_(timezone) + '</div>';
   html += '</td>';
   html += '<td style="width:170px;text-align:right;vertical-align:middle;">';
@@ -194,7 +203,8 @@ function CX_buildMetricsHtml_(metrics) {
   html += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>';
 
   for (var i = 0; i < metrics.length; i++) {
-    html += '<td style="width:20%;padding:6px;vertical-align:top;">';
+    var cellWidth = Math.floor(100 / Math.max(metrics.length, 1));
+    html += '<td style="width:' + cellWidth + '%;padding:6px;vertical-align:top;">';
     html += '<div style="border:1px solid #e5e1eb;border-radius:12px;padding:14px;background:#ffffff;min-height:78px;">';
     html += '<div style="font-size:12px;color:#666;line-height:1.3;">' + CX_escapeHtml_(metrics[i].label) + '</div>';
     html += '<div style="font-size:26px;font-weight:bold;color:#4b1d78;margin-top:5px;line-height:1;">' + CX_escapeHtml_(metrics[i].value) + '</div>';
@@ -219,8 +229,7 @@ function CX_buildSectionsHtml_(sections) {
 function CX_buildSectionHtml_(section) {
   section = section || {};
   var rows = section.rows || [];
-  var stream = section.stream || section.title || '';
-  var taskHeader = section.taskHeader || 'Tasks';
+  var taskHeader = section.taskHeader || 'Tasks/Productivity';
   var html = '';
 
   html += '<tr><td style="padding:14px 26px;">';
@@ -236,7 +245,6 @@ function CX_buildSectionHtml_(section) {
     html += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">';
     html += '<thead><tr style="background:#1f4e79;color:#ffffff;">';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Name</th>';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Stream</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Requester</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Details</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">' + CX_escapeHtml_(taskHeader) + '</th>';
@@ -248,7 +256,6 @@ function CX_buildSectionHtml_(section) {
       var rowBg = i % 2 === 0 ? '#ffffff' : '#f2f2f2';
       html += '<tr style="background:' + rowBg + ';">';
       html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].name || '') + '</td>';
-      html += '<td style="padding:9px;border:1px solid #ddd;' + CX_streamStyle_(rows[i].stream || stream) + '">' + CX_escapeHtml_(rows[i].stream || stream) + '</td>';
       html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].requester || '') + '</td>';
       html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].details || '') + '</td>';
       html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].tasksCompleted || '') + '</td>';
@@ -347,24 +354,33 @@ function CX_calculateReportTotals_(rows) {
   return totals;
 }
 
-function CX_buildReportSummary_(aiSummary, rows, totals) {
+function CX_buildReportSummary_(aiSummary, rows, totals, reportType) {
   var overall = aiSummary || 'The report was generated successfully. Review the metrics and section tables below for the selected period.';
+  var followUpTargets = 'missing attendance, no ticket activity, open-ticket note follow-up, or needing manual follow-up';
+  if (String(reportType || '').toLowerCase() === 'monthly') {
+    followUpTargets = 'missing attendance, no ticket activity, open-ticket note follow-up, WFM outstanding, or needing manual follow-up';
+  }
   return {
     overall: overall,
     highlights: 'Agents reviewed: ' + totals.agents + '. Tickets solved: ' + totals.ticketsSolved + '. Open tickets with notes: ' + totals.openTicketFollowUps + '.',
     risks: totals.reviewFlags ? (totals.reviewFlags + ' row(s) contain review notes. Missing attendance: ' + totals.missingAttendance + '. No ticket activity: ' + totals.noTicketActivity + '. Open ticket follow-up: ' + totals.openTicketFollowUps + '.') : 'No exception notes were flagged in the current report view.',
-    followUp: 'Review rows marked as missing attendance, no ticket activity, open-ticket note follow-up, WFM outstanding, or needing manual follow-up before sending management conclusions.'
+    followUp: 'Review rows marked as ' + followUpTargets + ' before sending management conclusions.'
   };
 }
 
-function CX_buildReportMetrics_(totals) {
-  return [
+function CX_buildReportMetrics_(totals, reportType) {
+  var metrics = [
     { label: 'Agents Reviewed', value: totals.agents, note: 'Current report rows' },
     { label: 'Tickets Solved', value: totals.ticketsSolved, note: 'Zendesk output' },
     { label: 'In Progress', value: totals.openTicketFollowUps, note: 'Open tickets with notes' },
-    { label: 'Review Flags', value: totals.reviewFlags, note: 'Rows with notes' },
-    { label: 'WFM Review', value: totals.wfmIssues, note: 'Monthly balance flags' }
+    { label: 'Review Flags', value: totals.reviewFlags, note: 'Rows with notes' }
   ];
+
+  if (String(reportType || '').toLowerCase() === 'monthly') {
+    metrics.push({ label: 'WFM Review', value: totals.wfmIssues, note: 'Monthly balance flags' });
+  }
+
+  return metrics;
 }
 
 function CX_buildReportSections_(rows, reportType) {
@@ -383,18 +399,19 @@ function CX_buildReportSections_(rows, reportType) {
   ];
 
   sections = sections.concat(CX_buildZendeskShiftSections_(rows));
-  sections = sections.concat([
-    {
-      title: 'Attendance Review',
-      stream: 'Attendance',
-      rows: CX_buildAttendanceEmailRows_(rows).slice(0, 25)
-    },
-    {
+  sections.push({
+    title: 'Attendance Review',
+    stream: 'Attendance',
+    rows: CX_buildAttendanceEmailRows_(rows).slice(0, 25)
+  });
+
+  if (String(reportType || '').toLowerCase() === 'monthly') {
+    sections.push({
       title: 'WFM Balance Review',
       stream: 'WFM',
       rows: CX_buildWfmEmailRows_(rows, reportType).slice(0, 25)
-    }
-  ]);
+    });
+  }
 
   return sections;
 }
@@ -604,14 +621,21 @@ function CX_buildAttendanceEmailRows_(rows) {
   var output = [];
   for (var i = 0; i < rows.length; i++) {
     var notes = String(rows[i][13] || '');
-    if (/missing attendance|attendance/i.test(notes) || rows[i][8] === '') {
+    var attendanceValue = rows[i][8];
+    var hasAttendance = !(attendanceValue === '' || attendanceValue === null || typeof attendanceValue === 'undefined');
+    var attendanceNumber = hasAttendance ? Number(attendanceValue) : '';
+    var isMissing = !hasAttendance || /missing attendance/i.test(notes);
+    var isBelowExpected = hasAttendance && !isNaN(attendanceNumber) && attendanceNumber < 1;
+    var hasAttendanceNote = /attendance|late|absent|awol/i.test(notes);
+
+    if (isMissing || isBelowExpected || hasAttendanceNote) {
       output.push({
         name: rows[i][6] || '',
         requester: rows[i][5] || '',
-        details: 'Attendance score: ' + CX_formatPercent_(rows[i][8]) + '. Shift: ' + (rows[i][7] || 'Unassigned') + '.',
-        status: /missing attendance/i.test(notes) || rows[i][8] === '' ? 'No productivity recorded' : 'Completed',
-        tasksCompleted: rows[i][8] === '' ? 0 : 1,
-        notes: notes || 'Attendance data available.'
+        details: 'Attendance score: ' + CX_formatPercent_(attendanceValue) + '. Shift: ' + (rows[i][7] || 'Unassigned') + '.',
+        status: isMissing || attendanceNumber === 0 ? 'No productivity recorded' : 'In progress',
+        tasksCompleted: isMissing ? 0 : CX_formatPercent_(attendanceValue),
+        notes: notes || 'Attendance below expected.'
       });
     }
   }
@@ -668,6 +692,30 @@ function CX_statusStyle_(status) {
     return 'background:#d9ead3;color:#006100;font-weight:bold;';
   }
   return '';
+}
+
+function CX_reportForLabel_(reportType, reportWindow) {
+  var type = String(reportType || '').toLowerCase();
+  if (!reportWindow) {
+    return Utilities.formatDate(new Date(), getReportTimezone_(), 'yyyy-MM-dd');
+  }
+  if (type === 'weekly') {
+    return reportWindow.fiscalWeek || CX_dataWindowLabel_(reportWindow);
+  }
+  if (type === 'monthly') {
+    return reportWindow.fiscalMonth || CX_dataWindowLabel_(reportWindow);
+  }
+  if (reportWindow.startDate) {
+    return Utilities.formatDate(reportWindow.startDate, getReportTimezone_(), 'yyyy-MM-dd');
+  }
+  return Utilities.formatDate(new Date(), getReportTimezone_(), 'yyyy-MM-dd');
+}
+
+function CX_dataWindowLabel_(reportWindow) {
+  if (!reportWindow || !reportWindow.startDate || !reportWindow.endDate) {
+    return '';
+  }
+  return formatDateTime_(reportWindow.startDate) + ' to ' + formatDateTime_(reportWindow.endDate);
 }
 
 function CX_reportTitle_(reportType) {

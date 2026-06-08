@@ -299,13 +299,13 @@ Cloudflare gives a free URL such as:
 https://reporting-system-main.pages.dev
 ```
 
-Set these required Cloudflare Pages environment variables:
+The Pages Function has the current Apps Script web app URL coded in the project, so dashboard users do not need to enter or save an Apps Script URL. These Cloudflare Pages environment variables are optional overrides:
 
 ```text
-APPS_SCRIPT_WEB_APP_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
-INTERNAL_API_SECRET=the same value as Apps Script Script Property INTERNAL_API_SECRET
+APPS_SCRIPT_WEB_APP_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec   optional override
+INTERNAL_API_SECRET=the same value as Apps Script Script Property INTERNAL_API_SECRET  optional protected POST mode
 ```
 
-The browser calls same-origin routes like `/api/bootstrap`, `/api/metrics`, `/api/insight`, `/api/hard-refresh`, `/api/sync-status`, and `/api/export.csv`. A Cloudflare Pages Function forwards those requests to Apps Script using the internal secret.
+The browser calls same-origin routes like `/api/bootstrap`, `/api/metrics`, `/api/insight`, `/api/hard-refresh`, `/api/sync-status`, and `/api/export.csv`. A Cloudflare Pages Function forwards those requests to Apps Script. If the internal secret is configured, it uses the protected `doPost` path; otherwise it uses the Apps Script JSON dashboard `doGet` path.
 
-The Cloudflare frontend should not contain Zendesk, Groq, Google, or Apps Script secrets. Secrets stay in Apps Script Script Properties and Cloudflare Pages environment variables. Apps Script remains the production backend and Google Sheets remains the data warehouse.
+The Cloudflare frontend should not contain Zendesk, Groq, Google, or internal API secrets. Secrets stay in Apps Script Script Properties and optional Cloudflare Pages environment variables. Apps Script remains the production backend and Google Sheets remains the data warehouse.

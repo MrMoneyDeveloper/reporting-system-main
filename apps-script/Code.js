@@ -1,3 +1,5 @@
+var DASHBOARD_PROJECT_API_TOKEN_ = 'cx-dashboard-api-20260608-46f64a04b4044e8d';
+
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Reporting Engine')
@@ -52,7 +54,29 @@ function onOpen() {
 function doGet(e) {
   var startedAt = new Date();
   var requestId = generateRunId();
-  if (e && e.parameter && String(e.parameter.format || '').toLowerCase() === 'json') {
+  var params = e && e.parameter ? e.parameter : {};
+  if (params.api) {
+    var apiName = String(params.api || '');
+    try {
+      var result = dispatchDashboardGetApi_(apiName, params);
+      return jsonResponse_(withApiResponseMetadata_({
+        status: 'OK',
+        result: result
+      }, requestId, 'doGet.' + apiName, startedAt, params, {
+        logAlways: apiName === 'dashboardHardRefresh'
+      }));
+    } catch (error) {
+      var failure = buildApiErrorPayload_(error, requestId, 'doGet.' + (apiName || 'unknown'), startedAt);
+      logApiEvent_('doGet.' + (apiName || 'unknown'), requestId, startedAt, sanitizeApiPayload_(params), failure, {
+        status: 'FAILED',
+        logAlways: true
+      });
+      logError('doGet', error, 'FAILED', 0);
+      return jsonResponse_(failure);
+    }
+  }
+
+  if (String(params.format || '').toLowerCase() === 'json') {
     return jsonResponse_(withApiResponseMetadata_({
       status: 'OK',
       service: 'BMRX Productivity Reporting Engine',
@@ -65,6 +89,56 @@ function doGet(e) {
     .evaluate()
     .setTitle('BMRX Productivity Dashboard')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function dispatchDashboardGetApi_(apiName, params) {
+  authorizeDashboardGetApi_(apiName, params || {});
+  var request = dashboardRequestFromGetParams_(params || {});
+  if (apiName === 'health' || apiName === 'dashboardHealth') {
+    return {
+      status: 'OK',
+      service: 'BMRX Productivity Reporting Engine',
+      timestamp: formatDateTime_(new Date())
+    };
+  }
+  if (apiName === 'dashboardBootstrap') {
+    return getDashboardBootstrapCached();
+  }
+  if (apiName === 'dashboardMetrics') {
+    return getDashboardMetricsCached(request);
+  }
+  if (apiName === 'dashboardInsight') {
+    return getDashboardInsightCached(request);
+  }
+  if (apiName === 'dashboardHardRefresh') {
+    return startDashboardHardRefresh(request);
+  }
+  if (apiName === 'dashboardSyncStatus') {
+    return getDashboardSyncStatus();
+  }
+  throw new Error('Unsupported dashboard API: ' + apiName);
+}
+
+function authorizeDashboardGetApi_(apiName, params) {
+  if (apiName === 'health' || apiName === 'dashboardHealth') {
+    return;
+  }
+  var expected = getScriptProperty_('DASHBOARD_PUBLIC_API_TOKEN') || DASHBOARD_PROJECT_API_TOKEN_;
+  if (!expected) {
+    return;
+  }
+  if (!params || String(params.dashboardToken || '') !== expected) {
+    throw new Error('Invalid dashboard API token.');
+  }
+}
+
+function dashboardRequestFromGetParams_(params) {
+  return {
+    periodType: String(params.periodType || 'daily'),
+    periodKey: String(params.periodKey || ''),
+    agentEmail: String(params.agentEmail || ''),
+    shift: String(params.shift || '')
+  };
 }
 
 function dashboardHealth() {

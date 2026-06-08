@@ -11,6 +11,8 @@ const JSON_HEADERS = {
 };
 
 const SHIFT_ORDER = ['Day', 'Mid', 'Night'];
+const DEFAULT_APPS_SCRIPT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx4mTPIf5scRTAC0dxxJO3SgInmlYfWagZP8-ye2s4O/exec';
+const DEFAULT_DASHBOARD_API_TOKEN = 'cx-dashboard-api-20260608-46f64a04b4044e8d';
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -102,19 +104,21 @@ async function proxyJson(env, action, requestPayload, startedAt) {
 async function callAppsScript(env, action, requestPayload) {
   const webAppUrl = getAppsScriptUrl(env);
   if (!webAppUrl) {
-    const error = new Error('Missing Cloudflare environment variable APPS_SCRIPT_WEB_APP_URL.');
+    const error = new Error('Apps Script web app URL is not configured in the project API bridge.');
     error.statusCode = 500;
     throw error;
+  }
+
+  const internalSecret = getInternalSecret(env);
+  if (!internalSecret) {
+    return callAppsScriptGet(webAppUrl, action, requestPayload);
   }
 
   const body = {
     action,
     request: requestPayload || {}
   };
-
-  if (env.INTERNAL_API_SECRET) {
-    body.secret = env.INTERNAL_API_SECRET;
-  }
+  body.secret = internalSecret;
 
   const response = await fetch(webAppUrl, {
     method: 'POST',
@@ -125,13 +129,38 @@ async function callAppsScript(env, action, requestPayload) {
     redirect: 'follow'
   });
 
+  return parseAppsScriptResponse(response, action);
+}
+
+async function callAppsScriptGet(webAppUrl, action, requestPayload) {
+  const params = new URLSearchParams({
+    format: 'json',
+    api: action,
+    dashboardToken: getDashboardApiToken()
+  });
+
+  Object.entries(requestPayload || {}).forEach(([key, value]) => {
+    if (value !== null && typeof value !== 'undefined' && typeof value !== 'object') {
+      params.set(key, String(value));
+    }
+  });
+
+  const response = await fetch(addQuery(webAppUrl, params.toString()), {
+    method: 'GET',
+    redirect: 'follow'
+  });
+
+  return parseAppsScriptResponse(response, action);
+}
+
+async function parseAppsScriptResponse(response, action) {
   const text = await response.text();
   let parsed;
   try {
     parsed = JSON.parse(text);
   } catch (error) {
     const htmlSnippet = text.replace(/\s+/g, ' ').slice(0, 240);
-    const badResponse = new Error(`Apps Script returned non-JSON HTTP ${response.status}: ${htmlSnippet}`);
+    const badResponse = new Error(`Apps Script returned non-JSON HTTP ${response.status} for ${action}: ${htmlSnippet}`);
     badResponse.statusCode = 502;
     throw badResponse;
   }
@@ -162,7 +191,8 @@ async function buildHealth(env, startedAt) {
     status: webAppUrl ? 'SUCCESS' : 'SETUP_REQUIRED',
     service: 'CX Experts Cloudflare dashboard API',
     appsScriptConfigured: Boolean(webAppUrl),
-    internalSecretConfigured: Boolean(env.INTERNAL_API_SECRET),
+    internalSecretConfigured: Boolean(getInternalSecret(env)),
+    connectionMode: getInternalSecret(env) ? 'POST_SECRET' : 'GET_PROJECT_API',
     generatedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt
   };
@@ -170,12 +200,12 @@ async function buildHealth(env, startedAt) {
   if (!webAppUrl) {
     return {
       ...base,
-      message: 'Set APPS_SCRIPT_WEB_APP_URL and INTERNAL_API_SECRET in Cloudflare Pages environment variables.'
+      message: 'Apps Script web app URL is not configured in the project API bridge.'
     };
   }
 
   try {
-    const healthUrl = addQuery(webAppUrl, 'format=json');
+    const healthUrl = addQuery(webAppUrl, 'format=json&api=health');
     const response = await fetch(healthUrl, { redirect: 'follow' });
     const text = await response.text();
     let parsed = {};
@@ -208,8 +238,21 @@ function getAppsScriptUrl(env) {
     env.APPS_SCRIPT_WEB_APP_URL ||
     env.APPS_SCRIPT_URL ||
     env.VITE_APPS_SCRIPT_WEB_APP_URL ||
+    DEFAULT_APPS_SCRIPT_WEB_APP_URL ||
     ''
   ).trim();
+}
+
+function getInternalSecret(env) {
+  return String(
+    env.INTERNAL_API_SECRET ||
+    env.APPS_SCRIPT_INTERNAL_API_SECRET ||
+    ''
+  ).trim();
+}
+
+function getDashboardApiToken() {
+  return DEFAULT_DASHBOARD_API_TOKEN;
 }
 
 function normalizeRoute(pathname) {
@@ -300,7 +343,7 @@ function buildReportCsv(metrics, filters) {
 function addSection(output, title, rows) {
   output.push([]);
   output.push([title]);
-  output.push(['Shift', 'Name', 'Stream', 'Requester', 'Details', 'Tasks', 'Status', 'Notes']);
+  output.push(['Shift', 'Name', 'Details', 'Tasks/Productivity', 'Status', 'Notes']);
   rows.forEach((row) => output.push(row));
 }
 
@@ -308,10 +351,8 @@ function buildShiftSummaryRows(rows) {
   return sortByShift(rows || []).map((row) => [
     row.label || '',
     row.label || '',
-    'Shift comparison',
-    '',
-    `Agents: ${row.agents || 0}; attendance: ${formatPercent(row.attendance)}; actions: ${row.actions || 0}; in progress: ${row.inProgressTickets || 0}`,
-    row.tickets || 0,
+    `Agents: ${row.agents || 0}; present/missing is reflected by attendance; solved ${row.tickets || 0}; commented ${row.commentedTickets || 0}; in progress ${row.inProgressTickets || 0}`,
+    row.actions || 0,
     row.inProgressTickets ? 'In progress' : 'Reviewed',
     'Tickets shown by shift for this reporting period.'
   ]);
@@ -321,8 +362,6 @@ function buildShiftRosterRows(rows) {
   return sortByShift(rows).map((row) => [
     row.shift || 'Unassigned',
     row.agentName || '',
-    'Shift roster',
-    row.agentEmail || '',
     `Assigned to ${row.shift || 'Unassigned'} shift`,
     row.inProgressTickets || '',
     getTicketFollowUpStatus(row),
@@ -334,21 +373,17 @@ function buildZendeskRows(rows) {
   return sortByShift(rows).map((row) => [
     row.shift || 'Unassigned',
     row.agentName || '',
-    'Zendesk',
-    row.agentEmail || '',
-    `Created ${row.ticketsCreated || 0}, updated ${row.ticketsUpdated || 0}, public replies ${row.publicReplies || 0}, in progress ${row.inProgressTickets || 0}`,
-    row.ticketsSolved || 0,
+    `Created ${row.ticketsCreated || 0}; solved ${row.ticketsSolved || 0}; commented ${row.commentedTickets || 0}; in progress ${row.inProgressTickets || 0}`,
+    `Solved ${row.ticketsSolved || 0}; commented ${row.commentedTickets || 0}`,
     getTicketFollowUpStatus(row),
     row.openTicketNotes || row.notes || ''
   ]);
 }
 
 function buildAttendanceRows(rows) {
-  return sortByShift(rows).map((row) => [
+  return sortByShift(rows).filter((row) => isAttendanceException(row)).map((row) => [
     row.shift || 'Unassigned',
     row.agentName || '',
-    'Attendance',
-    row.agentEmail || '',
     `Status: ${row.attendanceStatus || 'Missing'}; expected hours: ${formatNumber(row.expectedHours)}`,
     formatPercent(row.attendancePercent === '' ? null : Number(row.attendancePercent) * 100),
     row.attendancePercent === '' ? 'Missing data' : 'Reviewed',
@@ -360,8 +395,6 @@ function buildWfmRows(rows) {
   return sortByShift(rows).map((row) => [
     row.shift || 'Unassigned',
     row.agentName || '',
-    'WFM',
-    row.agentEmail || '',
     `Total ${formatNumber(row.wfmTotalHours)}h; productive ${formatNumber(row.wfmProductiveHours)}h; general ${formatNumber(row.wfmGeneralTaskHours)}h`,
     formatNumber(row.wfmOutstandingHours),
     Number(row.wfmOutstandingHours || 0) > 0 ? 'Outstanding' : 'Balanced',
@@ -373,13 +406,19 @@ function buildRiskRows(rows) {
   return sortByShift(rows).map((row) => [
     row.shift || 'Unassigned',
     row.agentName || '',
-    'Risk',
-    row.agentEmail || '',
     row.notes || row.openTicketNotes || row.wfmNotes || 'Review this row.',
     row.productivityActions || row.ticketsSolved || row.inProgressTickets || '',
     row.inProgressTickets ? 'In progress' : 'Needs review',
     row.openTicketNotes || (row.wfmOutstandingHours ? `WFM outstanding ${formatNumber(row.wfmOutstandingHours)}h` : '')
   ]);
+}
+
+function isAttendanceException(row) {
+  const status = String(row.attendanceStatus || '').toLowerCase();
+  const notes = String(row.notes || '').toLowerCase();
+  if (row.attendancePercent === '' || status.includes('missing')) return true;
+  if (status.includes('late') || status.includes('absent') || status.includes('awol') || status.includes('partial')) return true;
+  return notes.includes('attendance') && !notes.includes('no attendance exception');
 }
 
 function getTicketFollowUpStatus(row) {

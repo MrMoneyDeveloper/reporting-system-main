@@ -44,6 +44,7 @@ const DEFAULT_FILTERS = {
   agentEmail: '',
   shift: ''
 };
+const API_BASE_URL = String(import.meta.env.VITE_DASHBOARD_API_BASE_URL || '/api').replace(/\/+$/, '');
 
 function App() {
   const [activeView, setActiveView] = useState('overview');
@@ -98,7 +99,7 @@ function App() {
     setLoading((current) => ({ ...current, bootstrap: true }));
     setError('');
     try {
-      const data = await fetchJson('/api/bootstrap');
+      const data = await fetchJson(apiUrl('/bootstrap'));
       setBootstrap(data);
     } catch (requestError) {
       setError(requestError.message);
@@ -113,7 +114,7 @@ function App() {
     setVisibleRows(12);
     try {
       const query = new URLSearchParams(cleanFilters(filters)).toString();
-      const data = await fetchJson(`/api/metrics?${query}`);
+      const data = await fetchJson(apiUrl(`/metrics?${query}`));
       setMetrics(data);
     } catch (requestError) {
       setError(requestError.message);
@@ -125,7 +126,7 @@ function App() {
   async function loadSyncStatus() {
     setLoading((current) => ({ ...current, sync: true }));
     try {
-      const data = await fetchJson('/api/sync-status');
+      const data = await fetchJson(apiUrl('/sync-status'));
       setSyncStatus(data);
     } catch (requestError) {
       setSyncStatus({ status: 'ERROR', message: requestError.message });
@@ -138,7 +139,7 @@ function App() {
     setLoading((current) => ({ ...current, insight: true }));
     setInsight('');
     try {
-      const data = await fetchJson('/api/insight', {
+      const data = await fetchJson(apiUrl('/insight'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ request: cleanFilters(currentFilters) })
@@ -155,7 +156,7 @@ function App() {
     setLoading((current) => ({ ...current, hardRefresh: true }));
     setError('');
     try {
-      await fetchJson('/api/hard-refresh', {
+      await fetchJson(apiUrl('/hard-refresh'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ request: cleanFilters(currentFilters) })
@@ -182,7 +183,7 @@ function App() {
 
   function openCsvExport() {
     const query = new URLSearchParams(cleanFilters(currentFilters)).toString();
-    window.location.href = `/api/export.csv?${query}`;
+    window.location.href = apiUrl(`/export.csv?${query}`);
   }
 
   if (loading.bootstrap) {
@@ -331,7 +332,7 @@ function LoadingScreen() {
     <div className="center-screen">
       <Loader2 className="spin" size={34} />
       <h1>Loading CX Experts dashboard</h1>
-      <p>Connecting through the Cloudflare API proxy.</p>
+      <p>Connecting to the reporting engine and loading the latest analytics tables.</p>
     </div>
   );
 }
@@ -340,13 +341,13 @@ function SetupScreen({ message, onRetry }) {
   return (
     <div className="center-screen setup-screen">
       <div className="brand-mark">CX</div>
-      <h1>Cloudflare API setup needed</h1>
+      <h1>Dashboard API unavailable</h1>
       <p>{message}</p>
       <div className="setup-card">
-        <h2>Set these Cloudflare Pages environment variables</h2>
-        <code>APPS_SCRIPT_WEB_APP_URL</code>
-        <code>INTERNAL_API_SECRET</code>
-        <p className="muted">Then redeploy the Pages project. The framework preset can stay as None if the build command is set to npm run build.</p>
+        <h2>Project-coded connection</h2>
+        <p className="muted">
+          This dashboard uses the repository API bridge under <code>/api</code> to read Apps Script and Google Sheets data. Redeploy the latest project build if this screen appears after a code update.
+        </p>
       </div>
       <button className="btn btn-primary action-btn" onClick={onRetry}>
         <RefreshCw size={17} />
@@ -434,7 +435,8 @@ function KpiGrid({ metrics, periodType }) {
       <KpiCard icon={<Users size={20} />} label="Agents Reviewed" value={formatNumber(kpis.agents || 0, 0)} note="Current filtered period" />
       <KpiCard icon={<CheckCircle2 size={20} />} label="Attendance" value={formatRatioPercent(kpis.attendancePercent)} note="Average attendance" />
       <KpiCard icon={<BarChart3 size={20} />} label="Tickets Solved" value={formatNumber(kpis.ticketsSolved || 0, 0)} note="Zendesk solved count" />
-      <KpiCard icon={<Layers3 size={20} />} label="In Progress" value={formatNumber(kpis.inProgressTickets || 0, 0)} note="Open tickets with notes" />
+      <KpiCard icon={<Layers3 size={20} />} label="Commented Tickets" value={formatNumber(kpis.commentedTickets || 0, 0)} note="Unique note/reply activity" />
+      <KpiCard icon={<Search size={20} />} label="In Progress" value={formatNumber(kpis.inProgressTickets || 0, 0)} note="Open tickets with notes" />
       <KpiCard icon={<AlertTriangle size={20} />} label="Review Flags" value={formatNumber(kpis.riskCount || 0, 0)} note="Missing data or risk rows" />
       <KpiCard icon={<Clock3 size={20} />} label="WFM Outstanding" value={periodType === 'monthly' ? `${formatNumber(kpis.wfmOutstandingHours || 0)}h` : 'Monthly only'} note="Manual WFM balance" />
     </section>
@@ -464,9 +466,9 @@ function ShiftComparison({ shiftSummary }) {
             </div>
             <div className="mini-bars">
               <MetricBar label="Attendance" value={shift.attendance || 0} max={100} suffix="%" />
-              <MetricBar label="Actions" value={shift.actions || 0} max={maxValue(shiftSummary, 'actions')} />
+              <MetricBar label="Commented" value={shift.commentedTickets || 0} max={maxValue(shiftSummary, 'commentedTickets')} />
             </div>
-            <p>{formatNumber(shift.agents || 0, 0)} agents reviewed, {formatNumber(shift.inProgressTickets || 0, 0)} in progress</p>
+            <p>{formatNumber(shift.agents || 0, 0)} agents reviewed, {formatNumber(shift.commentedTickets || 0, 0)} commented, {formatNumber(shift.inProgressTickets || 0, 0)} in progress</p>
           </div>
         ))}
       </div>
@@ -542,7 +544,7 @@ function CompactRows({ rows, type }) {
           {type === 'zendesk' && row.inProgressTickets ? (
             <TicketStatusBadge row={row} />
           ) : (
-            <small>{type === 'zendesk' ? `${row.productivityActions || 0} actions` : row.attendanceStatus || 'Missing'}</small>
+            <small>{type === 'zendesk' ? `${row.commentedTickets || 0} commented, ${row.productivityActions || 0} actions` : row.attendanceStatus || 'Missing'}</small>
           )}
         </div>
       ))}
@@ -654,6 +656,7 @@ function MetricTable({ rows, compact }) {
             <th>Agent</th>
             <th>Attendance</th>
             <th>Solved</th>
+            <th>Commented</th>
             <th>Actions</th>
             <th>Status</th>
             <th>Expected</th>
@@ -671,6 +674,7 @@ function MetricTable({ rows, compact }) {
               </td>
               <td>{formatRatioPercent(row.attendancePercent)}</td>
               <td>{formatNumber(row.ticketsSolved || 0, 0)}</td>
+              <td>{formatNumber(row.commentedTickets || 0, 0)}</td>
               <td>{formatNumber(row.productivityActions || 0, 0)}</td>
               <td><TicketStatusBadge row={row} /></td>
               <td>{formatNumber(row.expectedHours || 0)}h</td>
@@ -811,6 +815,11 @@ async function fetchJson(url, options) {
   return data;
 }
 
+function apiUrl(path) {
+  const cleanPath = String(path || '').startsWith('/') ? String(path || '') : `/${path || ''}`;
+  return `${API_BASE_URL}${cleanPath}`;
+}
+
 function getPeriods(bootstrap, periodType) {
   const values = bootstrap?.periods?.[periodType] || [];
   return values.slice().sort();
@@ -834,13 +843,13 @@ function normalizeShiftSummary(summary, rows) {
   rows.forEach((row) => {
     const shift = row.shift || 'Unassigned';
     if (!byShift[shift]) {
-      byShift[shift] = { label: shift, agents: 0, attendance: null, tickets: 0, actions: 0, inProgressTickets: 0 };
+      byShift[shift] = { label: shift, agents: 0, attendance: null, tickets: 0, commentedTickets: 0, actions: 0, inProgressTickets: 0 };
     }
   });
 
   SHIFT_ORDER.forEach((shift) => {
     if (!byShift[shift]) {
-      byShift[shift] = { label: shift, agents: 0, attendance: 0, tickets: 0, actions: 0, inProgressTickets: 0 };
+      byShift[shift] = { label: shift, agents: 0, attendance: 0, tickets: 0, commentedTickets: 0, actions: 0, inProgressTickets: 0 };
     }
   });
 

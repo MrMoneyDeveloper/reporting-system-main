@@ -422,6 +422,7 @@ function normalizeDashboardRows_(records, periodType) {
       otherActions: Number(row['Other Actions'] || 0),
       ticketScore: Number(row['Ticket Score'] || 0),
       productivityActions: Number(row['Productivity Actions'] || 0),
+      commentedTickets: Number(row['Commented Tickets'] || 0),
       inProgressTickets: inProgressTickets,
       openTicketNotes: openTicketNotes,
       ticketFollowUpStatus: String(row['Ticket Follow-Up Status'] || (inProgressTickets ? 'In progress' : '')),
@@ -474,6 +475,7 @@ function buildDashboardKpis_(rows, periodType) {
   var attendanceTotal = 0;
   var attendanceCount = 0;
   var ticketsSolved = 0;
+  var commentedTickets = 0;
   var productivityActions = 0;
   var inProgressTickets = 0;
   var expectedHours = 0;
@@ -486,6 +488,7 @@ function buildDashboardKpis_(rows, periodType) {
       attendanceCount += 1;
     }
     ticketsSolved += rows[i].ticketsSolved;
+    commentedTickets += Number(rows[i].commentedTickets || 0);
     productivityActions += rows[i].productivityActions;
     inProgressTickets += Number(rows[i].inProgressTickets || 0);
     expectedHours += Number(rows[i].expectedHours || 0);
@@ -499,6 +502,7 @@ function buildDashboardKpis_(rows, periodType) {
     agents: rows.length,
     attendancePercent: attendanceCount ? round2_(attendanceTotal / attendanceCount) : '',
     ticketsSolved: ticketsSolved,
+    commentedTickets: commentedTickets,
     productivityActions: productivityActions,
     inProgressTickets: inProgressTickets,
     expectedHours: round2_(expectedHours),
@@ -544,6 +548,7 @@ function buildDashboardShiftChart_(rows) {
         attendanceTotal: 0,
         attendanceCount: 0,
         tickets: 0,
+        commentedTickets: 0,
         actions: 0,
         inProgressTickets: 0,
         agents: 0
@@ -551,6 +556,7 @@ function buildDashboardShiftChart_(rows) {
     }
     groups[shift].agents += 1;
     groups[shift].tickets += Number(rows[i].ticketsSolved || 0);
+    groups[shift].commentedTickets += Number(rows[i].commentedTickets || 0);
     groups[shift].actions += Number(rows[i].productivityActions || 0);
     groups[shift].inProgressTickets += Number(rows[i].inProgressTickets || 0);
     if (rows[i].attendancePercent !== '') {
@@ -570,6 +576,7 @@ function buildDashboardShiftChart_(rows) {
       agents: group.agents,
       attendance: group.attendanceCount ? round2_((group.attendanceTotal / group.attendanceCount) * 100) : null,
       tickets: group.tickets,
+      commentedTickets: group.commentedTickets,
       actions: group.actions,
       inProgressTickets: group.inProgressTickets
     });

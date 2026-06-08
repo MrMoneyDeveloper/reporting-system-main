@@ -11,7 +11,19 @@ function manualRunMonthly(referenceDate) {
 }
 
 function manualTestCxEmailTemplate() {
-  return sendTestCxReportEmail();
+  return sendTestCxReportEmail('daily', new Date());
+}
+
+function manualTestCxDailyEmail() {
+  return sendTestCxReportEmail('daily', new Date());
+}
+
+function manualTestCxWeeklyEmail() {
+  return sendTestCxReportEmail('weekly', new Date());
+}
+
+function manualTestCxMonthlyEmail() {
+  return sendTestCxReportEmail('monthly', new Date());
 }
 
 function manualRunSetup() {

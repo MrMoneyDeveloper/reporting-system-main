@@ -25,7 +25,9 @@ function onOpen() {
     .addItem('Generate + Email Daily Report', 'manualRunDaily')
     .addItem('Generate + Email Weekly Report', 'manualRunWeekly')
     .addItem('Generate + Email Monthly Report', 'manualRunMonthly')
-    .addItem('Test CX Email Template', 'manualTestCxEmailTemplate')
+    .addItem('Test CX Daily Email', 'manualTestCxDailyEmail')
+    .addItem('Test CX Weekly Email', 'manualTestCxWeeklyEmail')
+    .addItem('Test CX Monthly Email', 'manualTestCxMonthlyEmail')
     .addSeparator()
     .addItem('Diagnostic: Populate Zendesk Only', 'manualPopulateZendeskOnly')
     .addItem('Diagnostic: Cancel Zendesk Only', 'manualCancelZendeskOnlyJob')
@@ -191,6 +193,12 @@ function doPost(e) {
       result = manualRunMonthly(payload.referenceDate);
     } else if (action === 'testCxEmailTemplate') {
       result = manualTestCxEmailTemplate();
+    } else if (action === 'testCxDailyEmail') {
+      result = manualTestCxDailyEmail();
+    } else if (action === 'testCxWeeklyEmail') {
+      result = manualTestCxWeeklyEmail();
+    } else if (action === 'testCxMonthlyEmail') {
+      result = manualTestCxMonthlyEmail();
     } else if (action === 'createTriggers') {
       result = createTriggers();
     } else if (action === 'deleteTriggers') {

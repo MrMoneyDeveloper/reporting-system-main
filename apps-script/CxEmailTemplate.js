@@ -352,6 +352,11 @@ function CX_buildReportMetrics_(totals) {
 function CX_buildReportSections_(rows, reportType) {
   return [
     {
+      title: 'Shift Comparison',
+      stream: 'Shift Comparison',
+      rows: CX_buildShiftComparisonEmailRows_(rows)
+    },
+    {
       title: 'Zendesk Ticket Output',
       stream: 'Zendesk',
       rows: CX_buildZendeskEmailRows_(rows).slice(0, 25)
@@ -367,6 +372,92 @@ function CX_buildReportSections_(rows, reportType) {
       rows: CX_buildWfmEmailRows_(rows, reportType).slice(0, 25)
     }
   ];
+}
+
+function CX_buildShiftComparisonEmailRows_(rows) {
+  var groups = {};
+  var orderedShifts = ['Day', 'Mid', 'Night'];
+
+  for (var i = 0; i < orderedShifts.length; i++) {
+    groups[orderedShifts[i]] = CX_emptyShiftSummary_(orderedShifts[i]);
+  }
+
+  for (var j = 0; j < rows.length; j++) {
+    var shift = CX_normalizeShiftName_(rows[j][7]);
+    if (!groups[shift]) {
+      groups[shift] = CX_emptyShiftSummary_(shift);
+      orderedShifts.push(shift);
+    }
+
+    var group = groups[shift];
+    var attendance = rows[j][8];
+    var notes = String(rows[j][13] || '');
+
+    group.agents += 1;
+    group.ticketsSolved += Number(rows[j][9] || 0);
+    group.productiveHours += Number(rows[j][10] || 0);
+    group.unproductiveHours += Number(rows[j][11] || 0);
+    if (attendance !== '' && attendance !== null && typeof attendance !== 'undefined') {
+      group.attendanceTotal += Number(attendance || 0);
+      group.attendanceCount += 1;
+    }
+    if (notes) {
+      group.flags += 1;
+    }
+    if (/missing attendance/i.test(notes) || attendance === '') {
+      group.missingAttendance += 1;
+    }
+  }
+
+  var rowsOut = [];
+  for (var k = 0; k < orderedShifts.length; k++) {
+    var item = groups[orderedShifts[k]];
+    var attendanceAverage = item.attendanceCount ? round2_(item.attendanceTotal / item.attendanceCount) : '';
+    rowsOut.push({
+      name: item.shift + ' Shift',
+      stream: 'Shift Comparison',
+      requester: item.agents + ' agent(s)',
+      details: [
+        'Attendance avg: ' + CX_formatPercent_(attendanceAverage),
+        'Tickets solved: ' + item.ticketsSolved,
+        'Productive hours: ' + round2_(item.productiveHours),
+        'Unproductive hours: ' + round2_(item.unproductiveHours)
+      ].join('. ') + '.',
+      status: item.agents ? (item.flags ? 'In progress' : 'Completed') : 'No productivity recorded',
+      tasksCompleted: item.ticketsSolved,
+      notes: item.agents ? (item.flags + ' review flag(s); ' + item.missingAttendance + ' missing attendance row(s).') : 'No rows found for this shift in the selected period.'
+    });
+  }
+
+  return rowsOut;
+}
+
+function CX_emptyShiftSummary_(shift) {
+  return {
+    shift: shift || 'Unassigned',
+    agents: 0,
+    attendanceTotal: 0,
+    attendanceCount: 0,
+    ticketsSolved: 0,
+    productiveHours: 0,
+    unproductiveHours: 0,
+    flags: 0,
+    missingAttendance: 0
+  };
+}
+
+function CX_normalizeShiftName_(shift) {
+  var value = String(shift || '').trim().toLowerCase();
+  if (value.indexOf('day') !== -1 || value.indexOf('morning') !== -1) {
+    return 'Day';
+  }
+  if (value.indexOf('mid') !== -1 || value.indexOf('afternoon') !== -1 || value.indexOf('evening') !== -1) {
+    return 'Mid';
+  }
+  if (value.indexOf('night') !== -1) {
+    return 'Night';
+  }
+  return value ? CX_titleCase_(value) : 'Unassigned';
 }
 
 function CX_buildZendeskEmailRows_(rows) {

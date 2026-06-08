@@ -41,16 +41,28 @@ function sendReportEmail(reportType, aiSummary, excelFile) {
   return false;
 }
 
-function sendTestCxReportEmail() {
+function sendTestCxReportEmail(reportType, referenceDate) {
   setupProject();
+  var type = String(reportType || 'daily').toLowerCase();
   var recipients = getTestReportRecipients_();
   if (!recipients.length) {
     throw new Error('No TEST_EMAIL_RECIPIENTS, EMAIL_RECIPIENTS, or active user email was found.');
   }
 
-  var report = CX_buildSampleEmailReport_();
+  var windowInfo = getReportWindow(type, referenceDate || new Date());
+  var finalDataset = buildFinalReportDataset(type, windowInfo.startDate, windowInfo.endDate);
+  var aiSummary = '';
+
+  try {
+    aiSummary = generateAiSummary(buildAiPayload(finalDataset));
+  } catch (aiError) {
+    logError('sendTestCxReportEmail_' + type + '_AI', aiError, 'CONTINUED', 0);
+    aiSummary = 'AI summary failed during this email test. The report data below is still real.';
+  }
+
+  var report = CX_buildReportEmailModel_(type, windowInfo, aiSummary, finalDataset, '');
   var htmlBody = CX_buildAiReportEmailHtml_(report);
-  var subject = 'TEST - ' + report.reportTitle + ' - ' + report.reportDate;
+  var subject = 'TEST - ' + buildEmailSubject_(type, windowInfo);
 
   MailApp.sendEmail({
     to: recipients.join(','),
@@ -62,16 +74,19 @@ function sendTestCxReportEmail() {
 
   logPipelineEvent_({
     reportType: 'Email Diagnostic',
-    phase: 'cx-template',
+    phase: 'cx-template-' + type,
     status: 'SENT',
-    message: 'Sent CX email template test to ' + recipients.join(', '),
-    rowsProcessed: report.metrics ? report.metrics.length : 0
+    message: 'Sent real ' + type + ' CX email template test to ' + recipients.join(', ') + '. Rows=' + finalDataset.length + '.',
+    rowsProcessed: finalDataset.length
   });
 
   return {
     status: 'SENT',
+    reportType: type,
     recipients: recipients,
-    subject: subject
+    subject: subject,
+    rows: finalDataset.length,
+    window: windowInfo
   };
 }
 

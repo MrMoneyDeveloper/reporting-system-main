@@ -434,7 +434,7 @@ function KpiGrid({ metrics, periodType }) {
       <KpiCard icon={<Users size={20} />} label="Agents Reviewed" value={formatNumber(kpis.agents || 0, 0)} note="Current filtered period" />
       <KpiCard icon={<CheckCircle2 size={20} />} label="Attendance" value={formatRatioPercent(kpis.attendancePercent)} note="Average attendance" />
       <KpiCard icon={<BarChart3 size={20} />} label="Tickets Solved" value={formatNumber(kpis.ticketsSolved || 0, 0)} note="Zendesk solved count" />
-      <KpiCard icon={<Layers3 size={20} />} label="Productive Actions" value={formatNumber(kpis.productivityActions || 0, 0)} note="Ticket events counted" />
+      <KpiCard icon={<Layers3 size={20} />} label="In Progress" value={formatNumber(kpis.inProgressTickets || 0, 0)} note="Open tickets with notes" />
       <KpiCard icon={<AlertTriangle size={20} />} label="Review Flags" value={formatNumber(kpis.riskCount || 0, 0)} note="Missing data or risk rows" />
       <KpiCard icon={<Clock3 size={20} />} label="WFM Outstanding" value={periodType === 'monthly' ? `${formatNumber(kpis.wfmOutstandingHours || 0)}h` : 'Monthly only'} note="Manual WFM balance" />
     </section>
@@ -466,7 +466,7 @@ function ShiftComparison({ shiftSummary }) {
               <MetricBar label="Attendance" value={shift.attendance || 0} max={100} suffix="%" />
               <MetricBar label="Actions" value={shift.actions || 0} max={maxValue(shiftSummary, 'actions')} />
             </div>
-            <p>{formatNumber(shift.agents || 0, 0)} agents reviewed</p>
+            <p>{formatNumber(shift.agents || 0, 0)} agents reviewed, {formatNumber(shift.inProgressTickets || 0, 0)} in progress</p>
           </div>
         ))}
       </div>
@@ -539,7 +539,11 @@ function CompactRows({ rows, type }) {
         <div key={`${row.agentEmail}-${row.period}-${type}`} className="compact-row">
           <span>{row.agentName || row.agentEmail}</span>
           <strong>{type === 'zendesk' ? `${row.ticketsSolved || 0} solved` : formatRatioPercent(row.attendancePercent)}</strong>
-          <small>{type === 'zendesk' ? `${row.productivityActions || 0} actions` : row.attendanceStatus || 'Missing'}</small>
+          {type === 'zendesk' && row.inProgressTickets ? (
+            <TicketStatusBadge row={row} />
+          ) : (
+            <small>{type === 'zendesk' ? `${row.productivityActions || 0} actions` : row.attendanceStatus || 'Missing'}</small>
+          )}
         </div>
       ))}
     </div>
@@ -651,6 +655,7 @@ function MetricTable({ rows, compact }) {
             <th>Attendance</th>
             <th>Solved</th>
             <th>Actions</th>
+            <th>Status</th>
             <th>Expected</th>
             <th>WFM Outstanding</th>
             <th>Notes</th>
@@ -667,15 +672,21 @@ function MetricTable({ rows, compact }) {
               <td>{formatRatioPercent(row.attendancePercent)}</td>
               <td>{formatNumber(row.ticketsSolved || 0, 0)}</td>
               <td>{formatNumber(row.productivityActions || 0, 0)}</td>
+              <td><TicketStatusBadge row={row} /></td>
               <td>{formatNumber(row.expectedHours || 0)}h</td>
               <td>{row.wfmOutstandingHours === '' ? '' : `${formatNumber(row.wfmOutstandingHours)}h`}</td>
-              <td>{row.notes || row.wfmNotes || ''}</td>
+              <td>{row.openTicketNotes || row.notes || row.wfmNotes || ''}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
+}
+
+function TicketStatusBadge({ row }) {
+  const status = getTicketFollowUpStatus(row);
+  return <span className={`status-badge ${statusClass(status)}`}>{status}</span>;
 }
 
 function HorizontalBarList({ rows, empty }) {
@@ -823,13 +834,13 @@ function normalizeShiftSummary(summary, rows) {
   rows.forEach((row) => {
     const shift = row.shift || 'Unassigned';
     if (!byShift[shift]) {
-      byShift[shift] = { label: shift, agents: 0, attendance: null, tickets: 0, actions: 0 };
+      byShift[shift] = { label: shift, agents: 0, attendance: null, tickets: 0, actions: 0, inProgressTickets: 0 };
     }
   });
 
   SHIFT_ORDER.forEach((shift) => {
     if (!byShift[shift]) {
-      byShift[shift] = { label: shift, agents: 0, attendance: 0, tickets: 0, actions: 0 };
+      byShift[shift] = { label: shift, agents: 0, attendance: 0, tickets: 0, actions: 0, inProgressTickets: 0 };
     }
   });
 
@@ -857,6 +868,19 @@ function shiftRank(value) {
 
 function maxValue(rows, key) {
   return Math.max(1, ...rows.map((row) => Number(row[key] || 0)));
+}
+
+function getTicketFollowUpStatus(row) {
+  if (row?.ticketFollowUpStatus) return row.ticketFollowUpStatus;
+  if (Number(row?.inProgressTickets || 0) > 0) return 'In progress';
+  return Number(row?.ticketsSolved || 0) > 0 || Number(row?.productivityActions || 0) > 0 ? 'Activity recorded' : 'No activity';
+}
+
+function statusClass(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized.includes('progress') || normalized.includes('review')) return 'warning';
+  if (normalized.includes('no activity') || normalized.includes('no productivity')) return 'danger';
+  return 'success';
 }
 
 function formatNumber(value, decimals = 1) {

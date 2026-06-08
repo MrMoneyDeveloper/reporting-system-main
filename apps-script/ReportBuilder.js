@@ -17,6 +17,7 @@ function generateExcelReport(reportType, finalDataset) {
     ].concat(rows));
 
     writeReportSheet_(spreadsheet.insertSheet('Shift Summary'), 'Shift Summary', buildShiftSummaryRows_(rows));
+    writeReportSheet_(spreadsheet.insertSheet('Shift Roster'), 'Shift Roster', buildShiftRosterRows_(rows));
     writeReportSheet_(spreadsheet.insertSheet('Attendance Detail'), 'Attendance Detail', sheetRowsForReport_(SHEET_NAMES.NORMALIZED_ATTENDANCE));
     writeReportSheet_(spreadsheet.insertSheet('Ticket Detail'), 'Ticket Detail', sheetRowsForReport_(SHEET_NAMES.NORMALIZED_TICKETS));
     if (type === 'monthly') {
@@ -79,7 +80,9 @@ function writeReportSheet_(sheet, name, rows) {
     width = Math.max(width, rows[i].length);
   }
 
-  sheet.getRange(1, 1, rows.length, width).setValues(normalizeRowWidth_(rows, width));
+  var normalizedRows = normalizeRowWidth_(rows, width);
+  sheet.getRange(1, 1, rows.length, width).setValues(normalizedRows);
+  styleReportSheet_(sheet, normalizedRows, width);
   sheet.autoResizeColumns(1, width);
   sheet.setFrozenRows(1);
 }
@@ -91,17 +94,19 @@ function buildShiftSummaryRows_(finalRows) {
     var row = finalRows[i];
     var shift = row[7] || 'Unknown';
     if (!summary[shift]) {
-      summary[shift] = { agents: 0, attendance: 0, attendanceCount: 0, tickets: 0 };
+      summary[shift] = { agents: 0, attendance: 0, attendanceCount: 0, tickets: 0, inProgress: 0, agentNames: [] };
     }
     summary[shift].agents += 1;
+    summary[shift].agentNames.push(row[6] || row[5] || '');
     if (row[8] !== '') {
       summary[shift].attendance += Number(row[8]);
       summary[shift].attendanceCount += 1;
     }
     summary[shift].tickets += Number(row[9] || 0);
+    summary[shift].inProgress += Number(row[14] || 0);
   }
 
-  var rows = [['Shift', 'Agents', 'Attendance %', 'Tickets Solved']];
+  var rows = [['Shift', 'Agents', 'Who Is On Shift', 'Attendance %', 'Tickets Solved', 'In Progress Tickets']];
   for (var shiftName in summary) {
     if (!Object.prototype.hasOwnProperty.call(summary, shiftName)) {
       continue;
@@ -110,8 +115,10 @@ function buildShiftSummaryRows_(finalRows) {
     rows.push([
       shiftName,
       group.agents,
+      group.agentNames.filter(function (name) { return name; }).sort().join(', '),
       group.attendanceCount ? round2_(group.attendance / group.attendanceCount) : '',
-      group.tickets
+      group.tickets,
+      group.inProgress
     ]);
   }
 
@@ -119,13 +126,65 @@ function buildShiftSummaryRows_(finalRows) {
 }
 
 function buildExceptionRows_(finalRows) {
-  var rows = [['Agent Email', 'Agent Name', 'Shift', 'Notes']];
+  var rows = [['Agent Email', 'Agent Name', 'Shift', 'Notes', 'In Progress Tickets', 'Open Ticket Notes', 'Ticket Follow-Up Status']];
   for (var i = 0; i < finalRows.length; i++) {
-    if (finalRows[i][13]) {
-      rows.push([finalRows[i][5], finalRows[i][6], finalRows[i][7], finalRows[i][13]]);
+    if (finalRows[i][13] || finalRows[i][14]) {
+      rows.push([finalRows[i][5], finalRows[i][6], finalRows[i][7], finalRows[i][13], finalRows[i][14] || 0, finalRows[i][15] || '', finalRows[i][16] || '']);
     }
   }
   return rows;
+}
+
+function buildShiftRosterRows_(finalRows) {
+  var rows = [['Shift', 'Agent Name', 'Agent Email', 'Team', 'Site', 'Role', 'Ticket Follow-Up Status', 'Open Ticket Notes']];
+  var reportRows = (finalRows || []).slice().sort(function (left, right) {
+    var leftShift = String(left[7] || '');
+    var rightShift = String(right[7] || '');
+    if (leftShift !== rightShift) {
+      return leftShift.localeCompare(rightShift);
+    }
+    return String(left[6] || '').localeCompare(String(right[6] || ''));
+  });
+
+  for (var i = 0; i < reportRows.length; i++) {
+    var row = reportRows[i];
+    var agent = getAgentByEmail(row[5]) || {};
+    rows.push([
+      row[7] || 'Unassigned',
+      row[6] || agent.name || '',
+      row[5] || agent.email || '',
+      agent.team || '',
+      agent.site || '',
+      agent.role || '',
+      row[16] || '',
+      row[15] || ''
+    ]);
+  }
+
+  return rows;
+}
+
+function styleReportSheet_(sheet, rows, width) {
+  if (!rows || !rows.length) {
+    return;
+  }
+
+  sheet.getRange(1, 1, 1, width)
+    .setBackground('#1f4e79')
+    .setFontColor('#ffffff')
+    .setFontWeight('bold');
+
+  for (var rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+    for (var columnIndex = 0; columnIndex < width; columnIndex++) {
+      var value = String(rows[rowIndex][columnIndex] || '').toLowerCase();
+      if (value === 'in progress') {
+        sheet.getRange(rowIndex + 1, columnIndex + 1)
+          .setBackground('#fff2cc')
+          .setFontColor('#7f6000')
+          .setFontWeight('bold');
+      }
+    }
+  }
 }
 
 function buildRawExportInfoRows_(reportType, finalRows) {

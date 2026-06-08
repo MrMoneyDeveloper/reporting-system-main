@@ -397,6 +397,8 @@ function normalizeDashboardRows_(records, periodType) {
   var output = [];
   for (var i = 0; i < records.length; i++) {
     var row = records[i];
+    var inProgressTickets = Number(row['In Progress Tickets'] || 0);
+    var openTicketNotes = String(row['Open Ticket Notes'] || '');
     output.push({
       periodType: periodType,
       period: getDashboardRowPeriod_(row, periodType),
@@ -420,6 +422,9 @@ function normalizeDashboardRows_(records, periodType) {
       otherActions: Number(row['Other Actions'] || 0),
       ticketScore: Number(row['Ticket Score'] || 0),
       productivityActions: Number(row['Productivity Actions'] || 0),
+      inProgressTickets: inProgressTickets,
+      openTicketNotes: openTicketNotes,
+      ticketFollowUpStatus: String(row['Ticket Follow-Up Status'] || (inProgressTickets ? 'In progress' : '')),
       wfmTotalHours: dashboardNumberOrBlank_(row['WFM Total Hours']),
       wfmProductiveHours: dashboardNumberOrBlank_(row['WFM Productive Hours']),
       wfmGeneralTaskHours: dashboardNumberOrBlank_(row['WFM General Task Hours']),
@@ -470,6 +475,7 @@ function buildDashboardKpis_(rows, periodType) {
   var attendanceCount = 0;
   var ticketsSolved = 0;
   var productivityActions = 0;
+  var inProgressTickets = 0;
   var expectedHours = 0;
   var wfmOutstanding = 0;
   var riskCount = 0;
@@ -481,6 +487,7 @@ function buildDashboardKpis_(rows, periodType) {
     }
     ticketsSolved += rows[i].ticketsSolved;
     productivityActions += rows[i].productivityActions;
+    inProgressTickets += Number(rows[i].inProgressTickets || 0);
     expectedHours += Number(rows[i].expectedHours || 0);
     wfmOutstanding += Number(rows[i].wfmOutstandingHours || 0);
     if (isDashboardRiskRow_(rows[i])) {
@@ -493,6 +500,7 @@ function buildDashboardKpis_(rows, periodType) {
     attendancePercent: attendanceCount ? round2_(attendanceTotal / attendanceCount) : '',
     ticketsSolved: ticketsSolved,
     productivityActions: productivityActions,
+    inProgressTickets: inProgressTickets,
     expectedHours: round2_(expectedHours),
     wfmOutstandingHours: periodType === 'monthly' ? round2_(wfmOutstanding) : '',
     riskCount: riskCount
@@ -537,12 +545,14 @@ function buildDashboardShiftChart_(rows) {
         attendanceCount: 0,
         tickets: 0,
         actions: 0,
+        inProgressTickets: 0,
         agents: 0
       };
     }
     groups[shift].agents += 1;
     groups[shift].tickets += Number(rows[i].ticketsSolved || 0);
     groups[shift].actions += Number(rows[i].productivityActions || 0);
+    groups[shift].inProgressTickets += Number(rows[i].inProgressTickets || 0);
     if (rows[i].attendancePercent !== '') {
       groups[shift].attendanceTotal += Number(rows[i].attendancePercent);
       groups[shift].attendanceCount += 1;
@@ -560,7 +570,8 @@ function buildDashboardShiftChart_(rows) {
       agents: group.agents,
       attendance: group.attendanceCount ? round2_((group.attendanceTotal / group.attendanceCount) * 100) : null,
       tickets: group.tickets,
-      actions: group.actions
+      actions: group.actions,
+      inProgressTickets: group.inProgressTickets
     });
   }
   return output.sort(function (left, right) {
@@ -600,7 +611,7 @@ function buildDashboardRisks_(rows) {
 }
 
 function isDashboardRiskRow_(row) {
-  return Boolean(row.notes || row.wfmNotes || Number(row.wfmOutstandingHours || 0) > 0 || row.attendancePercent === '');
+  return Boolean(row.notes || row.openTicketNotes || row.wfmNotes || Number(row.inProgressTickets || 0) > 0 || Number(row.wfmOutstandingHours || 0) > 0 || row.attendancePercent === '');
 }
 
 function buildDashboardFreshness_() {
@@ -669,8 +680,10 @@ function compactDashboardRowsForAi_(rows, limit) {
       attendance: rows[i].attendancePercent,
       ticketsSolved: rows[i].ticketsSolved,
       productivityActions: rows[i].productivityActions,
+      inProgressTickets: rows[i].inProgressTickets,
+      openTicketNotes: rows[i].openTicketNotes,
       wfmOutstandingHours: rows[i].wfmOutstandingHours,
-      notes: rows[i].notes || rows[i].wfmNotes || ''
+      notes: rows[i].notes || rows[i].openTicketNotes || rows[i].wfmNotes || ''
     });
   }
   return output;
@@ -683,6 +696,7 @@ function buildDashboardFallbackInsight_(payload) {
     'Dashboard insight for ' + ((payload.filters && payload.filters.periodKey) || 'the selected period') + '.',
     'Agents reviewed: ' + (kpis.agents || 0) + '.',
     'Tickets solved: ' + (kpis.ticketsSolved || 0) + '.',
+    'Open tickets with notes: ' + (kpis.inProgressTickets || 0) + '.',
     'Risk rows flagged: ' + risks.length + '.'
   ].join('\n');
 }

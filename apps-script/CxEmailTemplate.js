@@ -35,11 +35,26 @@ function CX_buildSampleEmailReport_() {
     metrics: [
       { label: 'Agents Reviewed', value: 25, note: 'Sample team size' },
       { label: 'Tickets Solved', value: 42, note: 'Sample output' },
-      { label: 'Productive Actions', value: 71, note: 'Sample actions' },
+      { label: 'In Progress', value: 2, note: 'Open tickets with notes' },
       { label: 'Review Flags', value: 3, note: 'Needs attention' },
       { label: 'WFM Outstanding', value: '4.5h', note: 'Sample balance' }
     ],
     sections: [
+      {
+        title: 'Shift Roster',
+        stream: 'Shift Roster',
+        taskHeader: 'Shift',
+        rows: [
+          {
+            name: 'Agent Name',
+            requester: 'agent@example.com',
+            details: 'Team: Support. Site: Durban. Role: Agent.',
+            status: 'Completed',
+            tasksCompleted: 'Day',
+            notes: 'Assigned to Day shift.'
+          }
+        ]
+      },
       {
         title: 'Zendesk Ticket Output',
         stream: 'Zendesk',
@@ -205,6 +220,7 @@ function CX_buildSectionHtml_(section) {
   section = section || {};
   var rows = section.rows || [];
   var stream = section.stream || section.title || '';
+  var taskHeader = section.taskHeader || 'Tasks';
   var html = '';
 
   html += '<tr><td style="padding:14px 26px;">';
@@ -223,7 +239,7 @@ function CX_buildSectionHtml_(section) {
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Stream</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Requester</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Details</th>';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Tasks</th>';
+    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">' + CX_escapeHtml_(taskHeader) + '</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Status</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Notes</th>';
     html += '</tr></thead><tbody>';
@@ -297,6 +313,7 @@ function CX_calculateReportTotals_(rows) {
   var totals = {
     agents: rows.length,
     ticketsSolved: 0,
+    openTicketFollowUps: 0,
     productiveHours: 0,
     unproductiveHours: 0,
     reviewFlags: 0,
@@ -308,6 +325,7 @@ function CX_calculateReportTotals_(rows) {
   for (var i = 0; i < rows.length; i++) {
     var notes = String(rows[i][13] || '');
     totals.ticketsSolved += Number(rows[i][9] || 0);
+    totals.openTicketFollowUps += Number(rows[i][14] || 0);
     totals.productiveHours += Number(rows[i][10] || 0);
     totals.unproductiveHours += Number(rows[i][11] || 0);
     if (notes) {
@@ -333,9 +351,9 @@ function CX_buildReportSummary_(aiSummary, rows, totals) {
   var overall = aiSummary || 'The report was generated successfully. Review the metrics and section tables below for the selected period.';
   return {
     overall: overall,
-    highlights: 'Agents reviewed: ' + totals.agents + '. Tickets solved: ' + totals.ticketsSolved + '. Productive hours: ' + totals.productiveHours + '.',
-    risks: totals.reviewFlags ? (totals.reviewFlags + ' row(s) contain review notes. Missing attendance: ' + totals.missingAttendance + '. No ticket activity: ' + totals.noTicketActivity + '.') : 'No exception notes were flagged in the current report view.',
-    followUp: 'Review rows marked as missing attendance, no ticket activity, WFM outstanding, or needing manual follow-up before sending management conclusions.'
+    highlights: 'Agents reviewed: ' + totals.agents + '. Tickets solved: ' + totals.ticketsSolved + '. Open tickets with notes: ' + totals.openTicketFollowUps + '.',
+    risks: totals.reviewFlags ? (totals.reviewFlags + ' row(s) contain review notes. Missing attendance: ' + totals.missingAttendance + '. No ticket activity: ' + totals.noTicketActivity + '. Open ticket follow-up: ' + totals.openTicketFollowUps + '.') : 'No exception notes were flagged in the current report view.',
+    followUp: 'Review rows marked as missing attendance, no ticket activity, open-ticket note follow-up, WFM outstanding, or needing manual follow-up before sending management conclusions.'
   };
 }
 
@@ -343,7 +361,7 @@ function CX_buildReportMetrics_(totals) {
   return [
     { label: 'Agents Reviewed', value: totals.agents, note: 'Current report rows' },
     { label: 'Tickets Solved', value: totals.ticketsSolved, note: 'Zendesk output' },
-    { label: 'Productive Hours', value: totals.productiveHours, note: 'When available' },
+    { label: 'In Progress', value: totals.openTicketFollowUps, note: 'Open tickets with notes' },
     { label: 'Review Flags', value: totals.reviewFlags, note: 'Rows with notes' },
     { label: 'WFM Review', value: totals.wfmIssues, note: 'Monthly balance flags' }
   ];
@@ -356,6 +374,12 @@ function CX_buildReportSections_(rows, reportType) {
       stream: 'Shift Comparison',
       rows: CX_buildShiftComparisonEmailRows_(rows)
     },
+    {
+      title: 'Shift Roster',
+      stream: 'Shift Roster',
+      taskHeader: 'Shift',
+      rows: CX_buildShiftRosterEmailRows_(rows)
+    }
   ];
 
   sections = sections.concat(CX_buildZendeskShiftSections_(rows));
@@ -396,6 +420,7 @@ function CX_buildShiftComparisonEmailRows_(rows) {
 
     group.agents += 1;
     group.ticketsSolved += Number(rows[j][9] || 0);
+    group.inProgressTickets += Number(rows[j][14] || 0);
     group.productiveHours += Number(rows[j][10] || 0);
     group.unproductiveHours += Number(rows[j][11] || 0);
     if (attendance !== '' && attendance !== null && typeof attendance !== 'undefined') {
@@ -421,12 +446,13 @@ function CX_buildShiftComparisonEmailRows_(rows) {
       details: [
         'Attendance avg: ' + CX_formatPercent_(attendanceAverage),
         'Tickets solved: ' + item.ticketsSolved,
+        'Open-ticket notes: ' + item.inProgressTickets,
         'Productive hours: ' + round2_(item.productiveHours),
         'Unproductive hours: ' + round2_(item.unproductiveHours)
       ].join('. ') + '.',
-      status: item.agents ? (item.flags ? 'In progress' : 'Completed') : 'No productivity recorded',
+      status: item.agents ? (item.flags || item.inProgressTickets ? 'In progress' : 'Completed') : 'No productivity recorded',
       tasksCompleted: item.ticketsSolved,
-      notes: item.agents ? (item.flags + ' review flag(s); ' + item.missingAttendance + ' missing attendance row(s).') : 'No rows found for this shift in the selected period.'
+      notes: item.agents ? (item.flags + ' review flag(s); ' + item.missingAttendance + ' missing attendance row(s); ' + item.inProgressTickets + ' open ticket note(s).') : 'No rows found for this shift in the selected period.'
     });
   }
 
@@ -440,6 +466,7 @@ function CX_emptyShiftSummary_(shift) {
     attendanceTotal: 0,
     attendanceCount: 0,
     ticketsSolved: 0,
+    inProgressTickets: 0,
     productiveHours: 0,
     unproductiveHours: 0,
     flags: 0,
@@ -461,6 +488,20 @@ function CX_normalizeShiftName_(shift) {
   return value ? CX_titleCase_(value) : 'Unassigned';
 }
 
+function CX_shiftRank_(shift) {
+  var normalized = CX_normalizeShiftName_(shift);
+  if (normalized === 'Day') {
+    return 1;
+  }
+  if (normalized === 'Mid') {
+    return 2;
+  }
+  if (normalized === 'Night') {
+    return 3;
+  }
+  return 99;
+}
+
 function CX_buildZendeskEmailRows_(rows) {
   var output = [];
   var copy = rows.slice().sort(function (left, right) {
@@ -468,15 +509,48 @@ function CX_buildZendeskEmailRows_(rows) {
   });
 
   for (var i = 0; i < copy.length; i++) {
+    var inProgressTickets = Number(copy[i][14] || 0);
+    var status = inProgressTickets > 0 ? 'In progress' : (Number(copy[i][9] || 0) > 0 ? 'Completed' : 'No productivity recorded');
     output.push({
       name: copy[i][6] || '',
       requester: copy[i][5] || '',
-      details: 'Tickets solved: ' + Number(copy[i][9] || 0) + '. Attendance: ' + CX_formatPercent_(copy[i][8]) + '.',
-      status: Number(copy[i][9] || 0) > 0 ? 'Completed' : 'No productivity recorded',
+      details: 'Tickets solved: ' + Number(copy[i][9] || 0) + '. Open-ticket notes: ' + inProgressTickets + '. Attendance: ' + CX_formatPercent_(copy[i][8]) + '.',
+      status: status,
       tasksCompleted: Number(copy[i][9] || 0),
-      notes: copy[i][13] || ''
+      notes: CX_joinNotes_(copy[i][15], copy[i][13])
     });
   }
+  return output;
+}
+
+function CX_buildShiftRosterEmailRows_(rows) {
+  var output = [];
+  var copy = (rows || []).slice().sort(function (left, right) {
+    var leftShift = CX_shiftRank_(left[7]);
+    var rightShift = CX_shiftRank_(right[7]);
+    if (leftShift !== rightShift) {
+      return leftShift - rightShift;
+    }
+    return String(left[6] || '').localeCompare(String(right[6] || ''));
+  });
+
+  for (var i = 0; i < copy.length; i++) {
+    var agent = getAgentByEmail(copy[i][5]) || {};
+    var shift = copy[i][7] || 'Unassigned';
+    output.push({
+      name: copy[i][6] || agent.name || '',
+      requester: copy[i][5] || agent.email || '',
+      details: [
+        'Team: ' + CX_valueOrDash_(agent.team),
+        'Site: ' + CX_valueOrDash_(agent.site),
+        'Role: ' + CX_valueOrDash_(agent.role)
+      ].join('. ') + '.',
+      status: copy[i][16] || (Number(copy[i][14] || 0) > 0 ? 'In progress' : 'Completed'),
+      tasksCompleted: shift,
+      notes: copy[i][15] || ('Assigned to ' + shift + ' shift.')
+    });
+  }
+
   return output;
 }
 
@@ -627,6 +701,19 @@ function CX_valueOrDash_(value) {
     return '-';
   }
   return value;
+}
+
+function CX_joinNotes_() {
+  var output = [];
+  var seen = {};
+  for (var i = 0; i < arguments.length; i++) {
+    var value = String(arguments[i] || '').trim();
+    if (value && !seen[value]) {
+      seen[value] = true;
+      output.push(value);
+    }
+  }
+  return output.join('; ');
 }
 
 function CX_escapeHtml_(value) {

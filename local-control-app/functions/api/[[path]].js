@@ -278,11 +278,13 @@ function buildReportCsv(metrics, filters) {
   output.push(['Agents Reviewed', kpis.agents || 0]);
   output.push(['Tickets Solved', kpis.ticketsSolved || 0]);
   output.push(['Productive Actions', kpis.productivityActions || 0]);
+  output.push(['In Progress Tickets', kpis.inProgressTickets || 0]);
   output.push(['Review Flags', kpis.riskCount || 0]);
   output.push(['WFM Outstanding Hours', kpis.wfmOutstandingHours || '']);
   output.push([]);
 
   addSection(output, 'Shift Comparison', buildShiftSummaryRows(metrics.charts && metrics.charts.shiftSummary));
+  addSection(output, 'Shift Roster', buildShiftRosterRows(rows));
   addSection(output, 'Zendesk Ticket Output', buildZendeskRows(rows));
   addSection(output, 'Attendance Review', buildAttendanceRows(rows));
 
@@ -308,10 +310,23 @@ function buildShiftSummaryRows(rows) {
     row.label || '',
     'Shift comparison',
     '',
-    `Agents: ${row.agents || 0}; attendance: ${formatPercent(row.attendance)}; actions: ${row.actions || 0}`,
+    `Agents: ${row.agents || 0}; attendance: ${formatPercent(row.attendance)}; actions: ${row.actions || 0}; in progress: ${row.inProgressTickets || 0}`,
     row.tickets || 0,
-    'Reviewed',
+    row.inProgressTickets ? 'In progress' : 'Reviewed',
     'Tickets shown by shift for this reporting period.'
+  ]);
+}
+
+function buildShiftRosterRows(rows) {
+  return sortByShift(rows).map((row) => [
+    row.shift || 'Unassigned',
+    row.agentName || '',
+    'Shift roster',
+    row.agentEmail || '',
+    `Assigned to ${row.shift || 'Unassigned'} shift`,
+    row.inProgressTickets || '',
+    getTicketFollowUpStatus(row),
+    row.openTicketNotes || ''
   ]);
 }
 
@@ -321,10 +336,10 @@ function buildZendeskRows(rows) {
     row.agentName || '',
     'Zendesk',
     row.agentEmail || '',
-    `Created ${row.ticketsCreated || 0}, updated ${row.ticketsUpdated || 0}, public replies ${row.publicReplies || 0}`,
+    `Created ${row.ticketsCreated || 0}, updated ${row.ticketsUpdated || 0}, public replies ${row.publicReplies || 0}, in progress ${row.inProgressTickets || 0}`,
     row.ticketsSolved || 0,
-    row.ticketsSolved || row.productivityActions ? 'Activity recorded' : 'No activity',
-    row.notes || ''
+    getTicketFollowUpStatus(row),
+    row.openTicketNotes || row.notes || ''
   ]);
 }
 
@@ -360,11 +375,17 @@ function buildRiskRows(rows) {
     row.agentName || '',
     'Risk',
     row.agentEmail || '',
-    row.notes || row.wfmNotes || 'Review this row.',
-    row.productivityActions || row.ticketsSolved || '',
-    'Needs review',
-    row.wfmOutstandingHours ? `WFM outstanding ${formatNumber(row.wfmOutstandingHours)}h` : ''
+    row.notes || row.openTicketNotes || row.wfmNotes || 'Review this row.',
+    row.productivityActions || row.ticketsSolved || row.inProgressTickets || '',
+    row.inProgressTickets ? 'In progress' : 'Needs review',
+    row.openTicketNotes || (row.wfmOutstandingHours ? `WFM outstanding ${formatNumber(row.wfmOutstandingHours)}h` : '')
   ]);
+}
+
+function getTicketFollowUpStatus(row) {
+  if (row.ticketFollowUpStatus) return row.ticketFollowUpStatus;
+  if (Number(row.inProgressTickets || 0) > 0) return 'In progress';
+  return row.ticketsSolved || row.productivityActions ? 'Activity recorded' : 'No activity';
 }
 
 function sortByShift(rows) {

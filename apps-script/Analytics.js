@@ -315,7 +315,9 @@ function buildDailyAgentMetricRowsForDay_(operationalDate) {
     var publicReplies = sumMetricColumn_(tickets, 11);
     var otherActions = sumMetricColumn_(tickets, 12);
     var productivityActions = sumMetricColumn_(tickets, 13);
-    var notes = buildDailyMetricNotes_(attendance, tickets);
+    var inProgressTickets = sumMetricColumn_(tickets, 14);
+    var openTicketNotes = uniqueMetricValues_(tickets, 15).join('; ');
+    var notes = buildDailyMetricNotes_(attendance, tickets, inProgressTickets, openTicketNotes);
 
     output.push([
       dateKey_(day),
@@ -337,6 +339,8 @@ function buildDailyAgentMetricRowsForDay_(operationalDate) {
       ticketForms,
       ticketScore,
       productivityActions,
+      inProgressTickets,
+      openTicketNotes,
       notes,
       updatedAt
     ]);
@@ -412,6 +416,8 @@ function createRollupGroup_(periodKey, startDate, endDate, fiscalMonth, seedRow)
     otherActions: 0,
     ticketScore: 0,
     productivityActions: 0,
+    inProgressTickets: 0,
+    openTicketNotes: {},
     missingAttendanceDays: 0,
     noTicketDays: 0
   };
@@ -439,6 +445,10 @@ function addDailyMetricToRollupGroup_(group, row) {
   group.otherActions += Number(row['Other Actions'] || 0);
   group.ticketScore += Number(row['Ticket Score'] || 0);
   group.productivityActions += Number(row['Productivity Actions'] || 0);
+  group.inProgressTickets += Number(row['In Progress Tickets'] || 0);
+  if (row['Open Ticket Notes']) {
+    group.openTicketNotes[String(row['Open Ticket Notes'])] = true;
+  }
 
   if (!Number(row['Tickets Solved'] || 0) && !Number(row['Tickets Updated'] || 0) && !Number(row['Tickets Created'] || 0)) {
     group.noTicketDays += 1;
@@ -455,7 +465,8 @@ function rollupGroupsToRows_(groups, type) {
     var group = groups[keys[i]];
     var attendancePercent = group.attendanceScoreCount ? group.attendanceScoreTotal / group.attendanceScoreCount : '';
     var attendedDays = Object.keys(group.attendedDates).length;
-    var notes = buildRollupNotes_(group);
+    var openTicketNotes = Object.keys(group.openTicketNotes || {}).join('; ');
+    var notes = buildRollupNotes_(group, openTicketNotes);
 
     if (type === 'weekly') {
       rows.push([
@@ -477,6 +488,8 @@ function rollupGroupsToRows_(groups, type) {
         group.otherActions,
         group.ticketScore,
         group.productivityActions,
+        group.inProgressTickets,
+        openTicketNotes,
         notes,
         updatedAt
       ]);
@@ -500,6 +513,8 @@ function rollupGroupsToRows_(groups, type) {
         group.otherActions,
         group.ticketScore,
         group.productivityActions,
+        group.inProgressTickets,
+        openTicketNotes,
         wfm['WFM Total Hours'] || '',
         wfm['Productive Hours'] || '',
         wfm['General Task Hours'] || '',
@@ -525,7 +540,7 @@ function buildWfmBalanceMap_() {
   return map;
 }
 
-function buildDailyMetricNotes_(attendanceRows, ticketRows) {
+function buildDailyMetricNotes_(attendanceRows, ticketRows, inProgressTickets, openTicketNotes) {
   var notes = [];
   if (!attendanceRows.length) {
     notes.push('Missing attendance data');
@@ -533,16 +548,28 @@ function buildDailyMetricNotes_(attendanceRows, ticketRows) {
   if (!ticketRows.length) {
     notes.push('No ticket activity');
   }
+  if (Number(inProgressTickets || 0) > 0) {
+    notes.push('Open ticket note activity on ' + Number(inProgressTickets || 0) + ' open ticket(s)');
+  }
+  if (openTicketNotes) {
+    notes.push(openTicketNotes);
+  }
   return notes.join('; ');
 }
 
-function buildRollupNotes_(group) {
+function buildRollupNotes_(group, openTicketNotes) {
   var notes = [];
   if (group.missingAttendanceDays) {
     notes.push('Missing attendance on ' + group.missingAttendanceDays + ' day(s)');
   }
   if (group.noTicketDays) {
     notes.push('No ticket activity on ' + group.noTicketDays + ' day(s)');
+  }
+  if (Number(group.inProgressTickets || 0) > 0) {
+    notes.push('Open ticket note activity on ' + Number(group.inProgressTickets || 0) + ' open ticket(s)');
+  }
+  if (openTicketNotes) {
+    notes.push(openTicketNotes);
   }
   return notes.join('; ');
 }

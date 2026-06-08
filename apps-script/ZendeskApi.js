@@ -756,12 +756,13 @@ function chunkArray_(array, size) {
 
 function buildDefaultAgentObjects_() {
   var agents = [];
-  for (var i = 0; i < DEFAULT_AGENT_EMAILS.length; i++) {
+  for (var i = 0; i < DEFAULT_AGENT_ROSTER.length; i++) {
     agents.push({
       active: true,
-      name: nameFromEmail_(DEFAULT_AGENT_EMAILS[i]),
-      email: DEFAULT_AGENT_EMAILS[i],
-      shift: ''
+      name: DEFAULT_AGENT_ROSTER[i].name,
+      email: DEFAULT_AGENT_ROSTER[i].email,
+      team: DEFAULT_AGENT_ROSTER[i].team,
+      shift: DEFAULT_AGENT_ROSTER[i].shift
     });
   }
   return agents;

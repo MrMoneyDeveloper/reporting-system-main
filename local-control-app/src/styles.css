@@ -483,6 +483,41 @@ h1 {
   color: var(--muted);
 }
 
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.compact-row .status-badge {
+  grid-column: 1 / -1;
+}
+
+.status-badge.warning {
+  background: #fff2cc;
+  color: #7f6000;
+  border: 1px solid #f1d78a;
+}
+
+.status-badge.success {
+  background: #d9ead3;
+  color: #006100;
+  border: 1px solid #b7d7a8;
+}
+
+.status-badge.danger {
+  background: #f4cccc;
+  color: #990000;
+  border: 1px solid #e6a5a5;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line-soft);
@@ -495,7 +530,7 @@ h1 {
 
 table {
   width: 100%;
-  min-width: 930px;
+  min-width: 1040px;
   border-collapse: collapse;
 }
 

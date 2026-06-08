@@ -33,7 +33,10 @@ function normalizeTicketData(rawTickets) {
         created: 0,
         forms: {},
         publicReplies: 0,
-        otherActions: 0
+        otherActions: 0,
+        inProgressTicketIds: {},
+        openTicketNotes: [],
+        openTicketNoteMap: {}
       };
     }
 
@@ -66,6 +69,9 @@ function normalizeTicketData(rawTickets) {
     if (row.Form) {
       groups[key].forms[String(row.Form)] = true;
     }
+    if (isOpenTicketNoteRow_(row)) {
+      addOpenTicketNoteToGroup_(groups[key], row);
+    }
   }
 
   var output = [];
@@ -88,7 +94,9 @@ function normalizeTicketData(rawTickets) {
       group.solved + group.publicReplies,
       group.publicReplies,
       group.otherActions,
-      group.solved + group.publicReplies
+      group.solved + group.publicReplies,
+      Object.keys(group.inProgressTicketIds).length,
+      group.openTicketNotes.join('; ')
     ]);
   }
 
@@ -129,7 +137,10 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
     var tickets = collectPeriodRows_(ticketRows, agent, type, windowInfo);
     var attendancePercent = calculateAttendancePercent_(attendance);
     var ticketSolved = sumColumn_(tickets, 6);
-    var notes = buildFinalNotes_(attendance, tickets);
+    var inProgressTickets = sumColumn_(tickets, 14);
+    var openTicketNotes = uniqueMetricValues_(tickets, 15).join('; ');
+    var notes = buildFinalNotes_(attendance, tickets, inProgressTickets, openTicketNotes);
+    var ticketFollowUpStatus = inProgressTickets ? 'In progress' : (ticketSolved ? 'Completed' : 'No productivity recorded');
 
     output.push([
       type,
@@ -145,7 +156,10 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
       '',
       '',
       '',
-      notes
+      notes,
+      inProgressTickets,
+      openTicketNotes,
+      ticketFollowUpStatus
     ]);
   }
 
@@ -197,13 +211,19 @@ function calculateAttendancePercent_(rows) {
   return scoreCount > 0 ? scoreTotal / scoreCount : '';
 }
 
-function buildFinalNotes_(attendanceRows, ticketRows) {
+function buildFinalNotes_(attendanceRows, ticketRows, inProgressTickets, openTicketNotes) {
   var notes = [];
   if (attendanceRows.length === 0) {
     notes.push('Missing attendance data');
   }
   if (ticketRows.length === 0) {
     notes.push('No ticket activity');
+  }
+  if (Number(inProgressTickets || 0) > 0) {
+    notes.push('Open ticket note activity on ' + Number(inProgressTickets || 0) + ' open ticket(s)');
+  }
+  if (openTicketNotes) {
+    notes.push(openTicketNotes);
   }
   return notes.join('; ');
 }
@@ -250,6 +270,47 @@ function getTicketEventDateTime_(row) {
     return null;
   }
   return parseDate_(value);
+}
+
+function isOpenTicketNoteRow_(row) {
+  var status = String(row.Status || '').trim().toLowerCase();
+  if (!status || status === 'solved' || status === 'closed' || status === 'deleted') {
+    return false;
+  }
+
+  var eventType = String(row['Event Type'] || '').toLowerCase();
+  var actionDescription = String(row['Action Description'] || '').toLowerCase();
+  var commentText = String(row['Comment Text'] || '').trim();
+
+  return Boolean(
+    commentText ||
+    actionDescription.indexOf('internal note') !== -1 ||
+    actionDescription.indexOf('public customer reply') !== -1 ||
+    eventType.indexOf('customer reply') !== -1 ||
+    eventType.indexOf('public reply') !== -1
+  );
+}
+
+function addOpenTicketNoteToGroup_(group, row) {
+  var ticketId = String(row['Ticket ID'] || '').trim();
+  var ticketKey = ticketId || [row['Event Time'], row['Action Description'], row['Comment Text']].join('|');
+  var note = formatOpenTicketNote_(row);
+
+  if (ticketKey) {
+    group.inProgressTicketIds[ticketKey] = true;
+  }
+  if (note && !group.openTicketNoteMap[note]) {
+    group.openTicketNoteMap[note] = true;
+    group.openTicketNotes.push(note);
+  }
+}
+
+function formatOpenTicketNote_(row) {
+  var ticketId = String(row['Ticket ID'] || '').trim();
+  var status = String(row.Status || '').trim() || 'open';
+  var action = String(row['Action Description'] || row['Event Type'] || 'Note recorded').trim();
+  var label = ticketId ? '#' + ticketId : 'Open ticket';
+  return label + ' (' + status + '): ' + action;
 }
 
 function hasValue_(value) {

@@ -62,6 +62,10 @@ function manualCancelZendeskOnlyJob() {
   return cancelZendeskOnlyJob_();
 }
 
+function manualInspectZendeskCapMembers() {
+  return inspectZendeskCapMembers_();
+}
+
 function manualStartFiscalBackfill(referenceDate) {
   return startFiscalBackfillSourceSyncJob_(referenceDate ? parseDate_(referenceDate) : new Date());
 }

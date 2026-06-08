@@ -309,6 +309,214 @@ function fetchZendeskGroupsMap_(config) {
   return map;
 }
 
+var ZENDESK_CAP_GROUP_NAMES_ = Object.freeze([
+  '\uD83D\uDD34 CAP \u2014 Capaciti IT Support Agents',
+  '\uD83D\uDD34CAP \u2014 Branding Agents',
+  '\uD83D\uDD34CAP \u2014 Capciti Zendesk Agents'
+]);
+
+function inspectZendeskCapMembers_() {
+  var config = getZendeskPullConfig_(getActiveAgents());
+  if (!config.isConfigured) {
+    throw new Error('Zendesk Script Properties are not configured. Set ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, and ZENDESK_API_TOKEN.');
+  }
+
+  var runId = generateRunId();
+  var groups = fetchZendeskGroupsList_(config);
+  var targetGroups = matchZendeskCapGroups_(groups);
+  var rows = [];
+  var uniqueUsers = {};
+
+  logPipelineEvent_({
+    runId: runId,
+    reportType: 'Zendesk CAP Diagnostic',
+    phase: 'cap-members',
+    status: 'START',
+    message: 'Inspecting Zendesk CAP groups: ' + ZENDESK_CAP_GROUP_NAMES_.join('; ') + '.'
+  });
+
+  for (var i = 0; i < targetGroups.length; i++) {
+    var group = targetGroups[i];
+    var memberships = fetchZendeskGroupMemberships_(config, group.id);
+    var userIds = [];
+    for (var j = 0; j < memberships.length; j++) {
+      if (memberships[j] && memberships[j].user_id) {
+        userIds.push(memberships[j].user_id);
+      }
+    }
+
+    var usersById = fetchZendeskUsersByIds_(config, userIds);
+    var groupRows = [];
+    for (var k = 0; k < userIds.length; k++) {
+      var userId = String(userIds[k]);
+      var user = usersById[userId] || {};
+      var row = {
+        groupName: group.name || '',
+        groupId: String(group.id || ''),
+        userName: user.name || '',
+        email: normalizeEmail_(user.email || ''),
+        role: user.role || '',
+        suspended: user.suspended === true,
+        userId: userId
+      };
+      rows.push(row);
+      groupRows.push(row);
+      uniqueUsers[userId] = true;
+    }
+
+    logPipelineEvent_({
+      runId: runId,
+      reportType: 'Zendesk CAP Diagnostic',
+      phase: 'cap-members',
+      status: 'GROUP',
+      message: 'Group "' + group.name + '" (' + group.id + ') has ' + groupRows.length + ' member(s): ' + formatZendeskCapMembersForLog_(groupRows) + '.',
+      rowsProcessed: groupRows.length
+    });
+
+    for (var memberIndex = 0; memberIndex < groupRows.length; memberIndex++) {
+      logPipelineEvent_({
+        runId: runId,
+        reportType: 'Zendesk CAP Diagnostic',
+        phase: 'cap-members',
+        status: 'MEMBER',
+        message: 'Group="' + groupRows[memberIndex].groupName + '" groupId=' + groupRows[memberIndex].groupId + '; user="' + groupRows[memberIndex].userName + '" email=' + groupRows[memberIndex].email + ' role=' + groupRows[memberIndex].role + ' suspended=' + groupRows[memberIndex].suspended + ' userId=' + groupRows[memberIndex].userId + '.',
+        rowsProcessed: 1
+      });
+    }
+  }
+
+  var missingGroups = findMissingZendeskCapGroupNames_(targetGroups);
+  if (missingGroups.length) {
+    logPipelineEvent_({
+      runId: runId,
+      reportType: 'Zendesk CAP Diagnostic',
+      phase: 'cap-members',
+      status: 'MISSING_GROUPS',
+      message: 'Could not find configured CAP group(s): ' + missingGroups.join('; ') + '.'
+    });
+  }
+
+  rows.sort(function (left, right) {
+    var groupCompare = String(left.groupName || '').localeCompare(String(right.groupName || ''));
+    if (groupCompare !== 0) {
+      return groupCompare;
+    }
+    return String(left.userName || left.email || '').localeCompare(String(right.userName || right.email || ''));
+  });
+
+  logPipelineEvent_({
+    runId: runId,
+    reportType: 'Zendesk CAP Diagnostic',
+    phase: 'cap-members',
+    status: 'SUCCESS',
+    message: 'Zendesk CAP member diagnostic completed. Groups found=' + targetGroups.length + ', unique users=' + Object.keys(uniqueUsers).length + ', membership rows=' + rows.length + '.',
+    rowsProcessed: rows.length
+  });
+
+  return {
+    status: 'SUCCESS',
+    groupsFound: targetGroups.length,
+    missingGroups: missingGroups,
+    totalUniqueUsers: Object.keys(uniqueUsers).length,
+    totalMembershipRows: rows.length,
+    members: rows
+  };
+}
+
+function fetchZendeskGroupsList_(config) {
+  var output = [];
+  var url = '/api/v2/groups.json?per_page=100';
+  var pageCount = 0;
+
+  while (url && pageCount < 20) {
+    var data = zendeskGet_(config, url);
+    output = output.concat(data.groups || []);
+    url = data.next_page || '';
+    pageCount++;
+  }
+
+  return output;
+}
+
+function matchZendeskCapGroups_(groups) {
+  var expectedByKey = {};
+  var exactExpected = {};
+  for (var i = 0; i < ZENDESK_CAP_GROUP_NAMES_.length; i++) {
+    expectedByKey[normalizeKey_(ZENDESK_CAP_GROUP_NAMES_[i])] = true;
+    exactExpected[String(ZENDESK_CAP_GROUP_NAMES_[i]).trim()] = true;
+  }
+
+  var matches = [];
+  var seen = {};
+  for (var j = 0; j < (groups || []).length; j++) {
+    var group = groups[j] || {};
+    var name = String(group.name || '').trim();
+    var key = normalizeKey_(name);
+    if ((exactExpected[name] || expectedByKey[key]) && !seen[String(group.id)]) {
+      matches.push(group);
+      seen[String(group.id)] = true;
+    }
+  }
+
+  return matches;
+}
+
+function findMissingZendeskCapGroupNames_(matchedGroups) {
+  var foundKeys = {};
+  for (var i = 0; i < (matchedGroups || []).length; i++) {
+    foundKeys[normalizeKey_((matchedGroups[i] || {}).name)] = true;
+  }
+
+  var missing = [];
+  for (var j = 0; j < ZENDESK_CAP_GROUP_NAMES_.length; j++) {
+    if (!foundKeys[normalizeKey_(ZENDESK_CAP_GROUP_NAMES_[j])]) {
+      missing.push(ZENDESK_CAP_GROUP_NAMES_[j]);
+    }
+  }
+  return missing;
+}
+
+function fetchZendeskGroupMemberships_(config, groupId) {
+  var memberships = [];
+  var url = '/api/v2/groups/' + encodeURIComponent(groupId) + '/memberships.json?per_page=100';
+  var pageCount = 0;
+
+  while (url && pageCount < 20) {
+    var data = zendeskGet_(config, url);
+    memberships = memberships.concat(data.group_memberships || []);
+    url = data.next_page || '';
+    pageCount++;
+  }
+
+  return memberships;
+}
+
+function fetchZendeskUsersByIds_(config, ids) {
+  var map = {};
+  var chunks = chunkArray_(uniqueValues_(ids || []), 100);
+
+  for (var i = 0; i < chunks.length; i++) {
+    if (!chunks[i].length) {
+      continue;
+    }
+    var data = zendeskGet_(config, '/api/v2/users/show_many.json?ids=' + chunks[i].join(','));
+    var users = data.users || [];
+    for (var j = 0; j < users.length; j++) {
+      map[String(users[j].id)] = users[j];
+    }
+  }
+
+  return map;
+}
+
+function formatZendeskCapMembersForLog_(rows) {
+  var parts = [];
+  for (var i = 0; i < rows.length; i++) {
+    parts.push((rows[i].userName || '(no name)') + ' <' + (rows[i].email || 'no email') + '> role=' + (rows[i].role || '') + ' suspended=' + rows[i].suspended + ' id=' + rows[i].userId);
+  }
+  return parts.join('; ');
+}
+
 function addZendeskCreatedTicketRows_(rows, tickets, target, config, groupMap) {
   for (var i = 0; i < tickets.length; i++) {
     var ticket = tickets[i];

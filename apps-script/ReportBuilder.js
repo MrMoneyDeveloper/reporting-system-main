@@ -28,7 +28,7 @@ function generateExcelReport(reportType, finalDataset) {
 
     SpreadsheetApp.flush();
     var driveFile = DriveApp.getFileById(spreadsheet.getId());
-    var blob = driveFile.getBlob().getAs(MimeType.MICROSOFT_EXCEL);
+    var blob = exportSpreadsheetAsXlsxBlob_(spreadsheet.getId(), filename);
     blob.setName(filename);
     driveFile.setTrashed(true);
 
@@ -41,6 +41,24 @@ function generateExcelReport(reportType, finalDataset) {
     DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
     throw error;
   }
+}
+
+function exportSpreadsheetAsXlsxBlob_(spreadsheetId, filename) {
+  var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(spreadsheetId) +
+    '/export?mimeType=' + encodeURIComponent('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  var response = UrlFetchApp.fetch(url, {
+    method: 'get',
+    muteHttpExceptions: true,
+    headers: {
+      Authorization: 'Bearer ' + ScriptApp.getOAuthToken()
+    }
+  });
+  var statusCode = response.getResponseCode();
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error('Drive XLSX export returned HTTP ' + statusCode + ': ' + response.getContentText());
+  }
+
+  return response.getBlob().setName(filename);
 }
 
 function saveReportToDrive(fileBlob, filename) {

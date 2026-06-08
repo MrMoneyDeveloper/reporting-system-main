@@ -31,6 +31,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Diagnostic: Populate Zendesk Only', 'manualPopulateZendeskOnly')
     .addItem('Diagnostic: Cancel Zendesk Only', 'manualCancelZendeskOnlyJob')
+    .addItem('Diagnostic: Inspect Zendesk CAP Members', 'manualInspectZendeskCapMembers')
     .addItem('Import WFM Monthly Upload', 'manualImportWfmMonthlyUpload')
     .addItem('Rebuild WFM Monthly Balance', 'manualRebuildWfmMonthlyBalance')
     .addItem('Clear WFM Upload', 'manualClearWfmUpload')
@@ -205,6 +206,8 @@ function doPost(e) {
       result = manualTestCxWeeklyEmail();
     } else if (action === 'testCxMonthlyEmail') {
       result = manualTestCxMonthlyEmail();
+    } else if (action === 'inspectZendeskCapMembers') {
+      result = manualInspectZendeskCapMembers();
     } else if (action === 'createTriggers') {
       result = createTriggers();
     } else if (action === 'deleteTriggers') {

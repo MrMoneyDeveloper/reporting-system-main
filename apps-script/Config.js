@@ -57,7 +57,12 @@ var DEFAULT_CONFIG_ROWS = Object.freeze([
   ['DASHBOARD_SLOW_REQUEST_MS', '5000', 'Dashboard API calls slower than this are logged to Pipeline Log'],
   ['ATTENDANCE_SYNC_ENABLED', 'TRUE', 'Read attendance from the external attendance spreadsheet when configured'],
   ['ATTENDANCE_SHEET_NAME', '', 'Optional source tab name in the external attendance spreadsheet'],
-  ['EMAIL_RECIPIENTS', 'management@email.com', 'Comma-separated management report recipients']
+  ['EMAIL_RECIPIENTS', 'management@email.com', 'Comma-separated management report recipients'],
+  ['TEST_EMAIL_RECIPIENTS', '', 'Optional comma-separated recipients for email template tests; blank uses the active user or EMAIL_RECIPIENTS'],
+  ['CX_COMPANY_WEBSITE', 'https://www.cxexperts.co.za/', 'CX Experts website used in report email footer'],
+  ['CX_LINKEDIN_URL', 'https://za.linkedin.com/company/cxexperts', 'CX Experts LinkedIn URL used in report email footer'],
+  ['CX_YOUTUBE_URL', 'https://www.youtube.com/@Cx_Experts', 'CX Experts YouTube URL used in report email footer'],
+  ['CX_WHATSAPP_URL', 'https://chat.whatsapp.com/FlhsM5E5ibwGrsAtI4jNwz', 'CX Experts WhatsApp URL used in report email footer']
 ]);
 
 var REQUIRED_SCRIPT_PROPERTIES = Object.freeze([

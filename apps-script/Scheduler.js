@@ -124,7 +124,7 @@ function runReport_(reportType, referenceDate, force) {
       rows: report.rows
     });
 
-    emailSent = sendReportEmail(reportType, aiSummary, file, windowInfo);
+    emailSent = sendReportEmail(reportType, aiSummary, file, windowInfo, finalDataset);
 
     logRun({
       runId: runId,

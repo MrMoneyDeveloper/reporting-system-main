@@ -10,6 +10,10 @@ function manualRunMonthly(referenceDate) {
   return runReport_('monthly', referenceDate ? parseDate_(referenceDate) : new Date(), true);
 }
 
+function manualTestCxEmailTemplate() {
+  return sendTestCxReportEmail();
+}
+
 function manualRunSetup() {
   return setupProject();
 }

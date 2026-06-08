@@ -1,5 +1,6 @@
 function sendReportEmail(reportType, aiSummary, excelFile) {
   var reportWindow = arguments.length > 3 ? arguments[3] : getReportWindow(reportType, new Date());
+  var finalRows = arguments.length > 4 ? arguments[4] : getFinalDatasetRows_();
   var recipients = getReportRecipients();
   if (recipients.length === 0) {
     logError('sendReportEmail', new Error('No EMAIL_RECIPIENTS configured.'), 'SKIPPED', 0);
@@ -7,8 +8,11 @@ function sendReportEmail(reportType, aiSummary, excelFile) {
   }
 
   var subject = buildEmailSubject_(reportType, reportWindow);
-  var body = buildEmailBody_(reportWindow, aiSummary);
   var attachments = [];
+  var reportLink = excelFile && typeof excelFile.getUrl === 'function' ? excelFile.getUrl() : '';
+  var emailModel = CX_buildReportEmailModel_(reportType, reportWindow, aiSummary, finalRows, reportLink);
+  var htmlBody = CX_buildAiReportEmailHtml_(emailModel);
+  var body = CX_stripHtml_(htmlBody);
 
   if (excelFile) {
     attachments.push(typeof excelFile.getBlob === 'function' ? excelFile.getBlob() : excelFile);
@@ -20,7 +24,9 @@ function sendReportEmail(reportType, aiSummary, excelFile) {
         to: recipients.join(','),
         subject: subject,
         body: body,
-        attachments: attachments
+        htmlBody: htmlBody,
+        attachments: attachments,
+        name: 'CX Experts Reporting'
       });
       return true;
     } catch (error) {
@@ -33,6 +39,72 @@ function sendReportEmail(reportType, aiSummary, excelFile) {
   }
 
   return false;
+}
+
+function sendTestCxReportEmail() {
+  setupProject();
+  var recipients = getTestReportRecipients_();
+  if (!recipients.length) {
+    throw new Error('No TEST_EMAIL_RECIPIENTS, EMAIL_RECIPIENTS, or active user email was found.');
+  }
+
+  var report = CX_buildSampleEmailReport_();
+  var htmlBody = CX_buildAiReportEmailHtml_(report);
+  var subject = 'TEST - ' + report.reportTitle + ' - ' + report.reportDate;
+
+  MailApp.sendEmail({
+    to: recipients.join(','),
+    subject: subject,
+    body: CX_stripHtml_(htmlBody),
+    htmlBody: htmlBody,
+    name: 'CX Experts Reporting'
+  });
+
+  logPipelineEvent_({
+    reportType: 'Email Diagnostic',
+    phase: 'cx-template',
+    status: 'SENT',
+    message: 'Sent CX email template test to ' + recipients.join(', '),
+    rowsProcessed: report.metrics ? report.metrics.length : 0
+  });
+
+  return {
+    status: 'SENT',
+    recipients: recipients,
+    subject: subject
+  };
+}
+
+function getTestReportRecipients_() {
+  var configured = parseEmailList_(getConfigValue('TEST_EMAIL_RECIPIENTS', ''));
+  if (configured.length) {
+    return configured;
+  }
+
+  var activeEmail = '';
+  try {
+    activeEmail = Session.getActiveUser().getEmail();
+  } catch (ignored) {
+    activeEmail = '';
+  }
+
+  if (activeEmail) {
+    return [activeEmail];
+  }
+
+  return getReportRecipients();
+}
+
+function parseEmailList_(value) {
+  var text = String(value || '');
+  if (!text) {
+    return [];
+  }
+  return text.split(',').map(function (email) {
+    return email.trim();
+  }).filter(function (email) {
+    return email;
+  });
 }
 
 function buildEmailSubject_(reportType, reportWindow) {

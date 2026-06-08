@@ -112,7 +112,7 @@ function buildShiftSummaryRows_(finalRows) {
     var row = finalRows[i];
     var shift = row[7] || 'Unknown';
     if (!summary[shift]) {
-      summary[shift] = { agents: 0, attendance: 0, attendanceCount: 0, tickets: 0, inProgress: 0, agentNames: [] };
+      summary[shift] = { agents: 0, attendance: 0, attendanceCount: 0, tickets: 0, commented: 0, inProgress: 0, agentNames: [] };
     }
     summary[shift].agents += 1;
     summary[shift].agentNames.push(row[6] || row[5] || '');
@@ -121,10 +121,11 @@ function buildShiftSummaryRows_(finalRows) {
       summary[shift].attendanceCount += 1;
     }
     summary[shift].tickets += Number(row[9] || 0);
+    summary[shift].commented += Number(row[19] || 0);
     summary[shift].inProgress += Number(row[14] || 0);
   }
 
-  var rows = [['Shift', 'Agents', 'Who Is On Shift', 'Attendance %', 'Tickets Solved', 'In Progress Tickets']];
+  var rows = [['Shift', 'Agents', 'Who Is On Shift', 'Attendance %', 'Tickets Solved', 'Commented Tickets', 'In Progress Tickets']];
   for (var shiftName in summary) {
     if (!Object.prototype.hasOwnProperty.call(summary, shiftName)) {
       continue;
@@ -136,6 +137,7 @@ function buildShiftSummaryRows_(finalRows) {
       group.agentNames.filter(function (name) { return name; }).sort().join(', '),
       group.attendanceCount ? round2_(group.attendance / group.attendanceCount) : '',
       group.tickets,
+      group.commented,
       group.inProgress
     ]);
   }
@@ -144,17 +146,17 @@ function buildShiftSummaryRows_(finalRows) {
 }
 
 function buildExceptionRows_(finalRows) {
-  var rows = [['Agent Email', 'Agent Name', 'Shift', 'Notes', 'In Progress Tickets', 'Open Ticket Notes', 'Ticket Follow-Up Status']];
+  var rows = [['Agent Email', 'Agent Name', 'Shift', 'Notes', 'In Progress Tickets', 'Commented Tickets', 'Useful Notes', 'Ticket Follow-Up Status']];
   for (var i = 0; i < finalRows.length; i++) {
     if (finalRows[i][13] || finalRows[i][14]) {
-      rows.push([finalRows[i][5], finalRows[i][6], finalRows[i][7], finalRows[i][13], finalRows[i][14] || 0, finalRows[i][15] || '', finalRows[i][16] || '']);
+      rows.push([finalRows[i][5], finalRows[i][6], finalRows[i][7], finalRows[i][13], finalRows[i][14] || 0, finalRows[i][19] || 0, finalRows[i][20] || finalRows[i][15] || '', finalRows[i][16] || '']);
     }
   }
   return rows;
 }
 
 function buildShiftRosterRows_(finalRows) {
-  var rows = [['Shift', 'Agent Name', 'Agent Email', 'Team', 'Site', 'Role', 'Ticket Follow-Up Status', 'Open Ticket Notes']];
+  var rows = [['Shift', 'Agent Name', 'Agent Email', 'Ticket Follow-Up Status', 'Useful Notes']];
   var reportRows = (finalRows || []).slice().sort(function (left, right) {
     var leftShift = String(left[7] || '');
     var rightShift = String(right[7] || '');
@@ -171,11 +173,8 @@ function buildShiftRosterRows_(finalRows) {
       row[7] || 'Unassigned',
       row[6] || agent.name || '',
       row[5] || agent.email || '',
-      agent.team || '',
-      agent.site || '',
-      agent.role || '',
       row[16] || '',
-      row[15] || ''
+      row[20] || row[15] || ''
     ]);
   }
 

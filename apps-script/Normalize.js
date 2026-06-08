@@ -34,6 +34,7 @@ function normalizeTicketData(rawTickets) {
         forms: {},
         publicReplies: 0,
         otherActions: 0,
+        commentedTicketIds: {},
         inProgressTicketIds: {},
         openTicketNotes: [],
         openTicketNoteMap: {}
@@ -69,6 +70,9 @@ function normalizeTicketData(rawTickets) {
     if (row.Form) {
       groups[key].forms[String(row.Form)] = true;
     }
+    if (isCommentActivityRow_(row)) {
+      addCommentedTicketToGroup_(groups[key], row);
+    }
     if (isOpenTicketNoteRow_(row)) {
       addOpenTicketNoteToGroup_(groups[key], row);
     }
@@ -96,7 +100,8 @@ function normalizeTicketData(rawTickets) {
       group.otherActions,
       group.solved + group.publicReplies,
       Object.keys(group.inProgressTicketIds).length,
-      group.openTicketNotes.join('; ')
+      group.openTicketNotes.join('; '),
+      Object.keys(group.commentedTicketIds).length
     ]);
   }
 
@@ -117,10 +122,14 @@ function buildFinalReportDataset(reportType, startDate, endDate) {
   clearAndWriteRows(SHEET_NAMES.NORMALIZED_ATTENDANCE, SHEET_HEADERS[SHEET_NAMES.NORMALIZED_ATTENDANCE], attendanceRows);
 
   var rawTicketRows = filterRawZendeskForWindow_(getSheetData(SHEET_NAMES.RAW_ZENDESK), windowInfo.startDate, windowInfo.endDate);
+  var commentActivityRows = buildZendeskCommentActivityRows_(rawTicketRows);
+  clearAndWriteRows(SHEET_NAMES.ZENDESK_COMMENT_ACTIVITY, SHEET_HEADERS[SHEET_NAMES.ZENDESK_COMMENT_ACTIVITY], commentActivityRows);
+
   var ticketRows = normalizeTicketData(rawTicketRows);
   clearAndWriteRows(SHEET_NAMES.NORMALIZED_TICKETS, SHEET_HEADERS[SHEET_NAMES.NORMALIZED_TICKETS], ticketRows);
 
   var finalRows = joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, []);
+  validateFinalReportRows_(reportType, windowInfo, finalRows);
   clearAndWriteRows(SHEET_NAMES.CURRENT_REPORT_VIEW, SHEET_HEADERS[SHEET_NAMES.CURRENT_REPORT_VIEW], finalRows);
   clearAndWriteRows(SHEET_NAMES.FINAL_DATASET, SHEET_HEADERS[SHEET_NAMES.FINAL_DATASET], finalRows);
   return finalRows;
@@ -130,6 +139,8 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
   var type = String(reportType || '').toLowerCase();
   var agents = getActiveAgents();
   var output = [];
+  var wfmMap = type === 'monthly' ? buildFinalWfmBalanceMap_() : {};
+  var wfmFreshness = type === 'monthly' ? getLatestWfmUploadFreshness_() : '';
 
   for (var i = 0; i < agents.length; i++) {
     var agent = agents[i];
@@ -137,10 +148,21 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
     var tickets = collectPeriodRows_(ticketRows, agent, type, windowInfo);
     var attendancePercent = calculateAttendancePercent_(attendance);
     var ticketSolved = sumColumn_(tickets, 6);
+    var ticketsCreated = sumColumn_(tickets, 8);
+    var commentedTickets = sumColumn_(tickets, 16);
     var inProgressTickets = sumColumn_(tickets, 14);
     var openTicketNotes = uniqueMetricValues_(tickets, 15).join('; ');
-    var notes = buildFinalNotes_(attendance, tickets, inProgressTickets, openTicketNotes);
-    var ticketFollowUpStatus = inProgressTickets ? 'In progress' : (ticketSolved ? 'Completed' : 'No productivity recorded');
+    var attendanceStatus = uniqueMetricValues_(attendance, 6).join(', ');
+    var notes = buildFinalNotes_(attendance, tickets, inProgressTickets, openTicketNotes, commentedTickets);
+    var usefulNotes = buildUsefulReportNotes_(notes, openTicketNotes);
+    var ticketFollowUpStatus = inProgressTickets ? 'In progress' : ((ticketSolved || commentedTickets || ticketsCreated) ? 'Completed' : 'No productivity recorded');
+    var wfm = wfmMap[windowInfo.fiscalMonth + '|' + agent.email] || {};
+    var wfmTotalHours = wfm['WFM Total Hours'] || '';
+    var wfmOutstandingHours = wfm['Outstanding Hours'] || '';
+    if (type === 'monthly' && wfm.Notes) {
+      notes = safeJoinText_([notes, 'WFM: ' + wfm.Notes]);
+      usefulNotes = safeJoinText_([usefulNotes, 'WFM: ' + wfm.Notes]);
+    }
 
     output.push([
       type,
@@ -159,7 +181,14 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
       notes,
       inProgressTickets,
       openTicketNotes,
-      ticketFollowUpStatus
+      ticketFollowUpStatus,
+      attendanceStatus,
+      ticketsCreated,
+      commentedTickets,
+      usefulNotes,
+      wfmTotalHours,
+      wfmOutstandingHours,
+      wfmFreshness
     ]);
   }
 
@@ -211,13 +240,16 @@ function calculateAttendancePercent_(rows) {
   return scoreCount > 0 ? scoreTotal / scoreCount : '';
 }
 
-function buildFinalNotes_(attendanceRows, ticketRows, inProgressTickets, openTicketNotes) {
+function buildFinalNotes_(attendanceRows, ticketRows, inProgressTickets, openTicketNotes, commentedTickets) {
   var notes = [];
   if (attendanceRows.length === 0) {
     notes.push('Missing attendance data');
   }
   if (ticketRows.length === 0) {
     notes.push('No ticket activity');
+  }
+  if (Number(commentedTickets || 0) > 0) {
+    notes.push('Comment activity on ' + Number(commentedTickets || 0) + ' ticket(s)');
   }
   if (Number(inProgressTickets || 0) > 0) {
     notes.push('Open ticket note activity on ' + Number(inProgressTickets || 0) + ' open ticket(s)');
@@ -226,6 +258,98 @@ function buildFinalNotes_(attendanceRows, ticketRows, inProgressTickets, openTic
     notes.push(openTicketNotes);
   }
   return notes.join('; ');
+}
+
+function buildZendeskCommentActivityRows_(rawTickets) {
+  var rows = rawTickets || [];
+  var agentMap = getAgentEmailMap();
+  var byKey = {};
+
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (!isCommentActivityRow_(row)) {
+      continue;
+    }
+
+    var email = normalizeEmail_(row['Agent Email']);
+    if (!email || !agentMap[email]) {
+      continue;
+    }
+
+    var eventDateTime = getTicketEventDateTime_(row);
+    if (!eventDateTime) {
+      continue;
+    }
+
+    var operationalDate = getOperationalDateForDateTime_(eventDateTime);
+    var shift = getShiftForDateTime_(eventDateTime);
+    var fiscalInfo = getFiscalInfo(operationalDate);
+    var ticketId = String(row['Ticket ID'] || '').trim();
+    var key = [dateKey_(operationalDate), shift, email, ticketId || i].join('|');
+    var snippet = getZendeskCommentSnippet_(row);
+    var candidate = [
+      dateKey_(operationalDate),
+      fiscalInfo.fiscalWeek,
+      fiscalInfo.fiscalMonth,
+      shift,
+      email,
+      agentMap[email].name || row['Agent Name'] || '',
+      ticketId,
+      row.Status || '',
+      row['Event Time'] || row['Updated At'] || '',
+      row['Event Type'] || '',
+      snippet,
+      isOpenTicketNoteRow_(row) ? 'TRUE' : 'FALSE'
+    ];
+
+    if (!byKey[key] || parseDate_(candidate[8]).getTime() >= parseDate_(byKey[key][8]).getTime()) {
+      byKey[key] = candidate;
+    }
+  }
+
+  var keys = Object.keys(byKey).sort();
+  var output = [];
+  for (var j = 0; j < keys.length; j++) {
+    output.push(byKey[keys[j]]);
+  }
+  return output;
+}
+
+function validateFinalReportRows_(reportType, windowInfo, rows) {
+  var type = String(reportType || '').toLowerCase();
+  var periodTypes = {};
+  var fiscalWeeks = {};
+  var fiscalMonths = {};
+  for (var i = 0; i < (rows || []).length; i++) {
+    periodTypes[String(rows[i][0] || '')] = true;
+    if (rows[i][3]) {
+      fiscalWeeks[String(rows[i][3])] = true;
+    }
+    if (rows[i][4]) {
+      fiscalMonths[String(rows[i][4])] = true;
+    }
+  }
+
+  var warnings = [];
+  if (Object.keys(periodTypes).length !== 1 || !periodTypes[type]) {
+    warnings.push('period type mismatch');
+  }
+  if (type === 'weekly' && Object.keys(fiscalWeeks).length !== 1) {
+    warnings.push('weekly report has ' + Object.keys(fiscalWeeks).length + ' fiscal weeks');
+  }
+  if (type === 'monthly' && Object.keys(fiscalMonths).length !== 1) {
+    warnings.push('monthly report has ' + Object.keys(fiscalMonths).length + ' fiscal months');
+  }
+
+  if (warnings.length) {
+    logPipelineEvent_({
+      reportType: 'Report View Validation',
+      phase: 'current-report-view',
+      status: 'WARNING',
+      message: 'Current Report View validation warning for ' + type + ': ' + warnings.join('; ') + '. Window=' + formatDateTime_(windowInfo.startDate) + ' to ' + formatDateTime_(windowInfo.endDate) + '.',
+      rowsProcessed: rows ? rows.length : 0
+    });
+  }
 }
 
 function sumColumn_(rows, index) {
@@ -278,6 +402,14 @@ function isOpenTicketNoteRow_(row) {
     return false;
   }
 
+  return isCommentActivityRow_(row);
+}
+
+function isCommentActivityRow_(row) {
+  if (!row) {
+    return false;
+  }
+
   var eventType = String(row['Event Type'] || '').toLowerCase();
   var actionDescription = String(row['Action Description'] || '').toLowerCase();
   var commentText = String(row['Comment Text'] || '').trim();
@@ -293,8 +425,17 @@ function isOpenTicketNoteRow_(row) {
     eventType.indexOf('internal note') !== -1 ||
     eventType.indexOf('private note') !== -1 ||
     eventType.indexOf('customer reply') !== -1 ||
-    eventType.indexOf('public reply') !== -1
+    eventType.indexOf('public reply') !== -1 ||
+    eventType.indexOf('comment') !== -1
   );
+}
+
+function addCommentedTicketToGroup_(group, row) {
+  var ticketId = String(row['Ticket ID'] || '').trim();
+  var ticketKey = ticketId || [row['Event Time'], row['Action Description'], row['Comment Text']].join('|');
+  if (ticketKey) {
+    group.commentedTicketIds[ticketKey] = true;
+  }
 }
 
 function addOpenTicketNoteToGroup_(group, row) {
@@ -314,9 +455,70 @@ function addOpenTicketNoteToGroup_(group, row) {
 function formatOpenTicketNote_(row) {
   var ticketId = String(row['Ticket ID'] || '').trim();
   var status = String(row.Status || '').trim() || 'open';
-  var action = String(row['Action Description'] || row['Event Type'] || 'Note recorded').trim();
+  var action = getZendeskCommentSnippet_(row);
   var label = ticketId ? '#' + ticketId : 'Open ticket';
   return label + ' (' + status + '): ' + action;
+}
+
+function getZendeskCommentSnippet_(row) {
+  var text = String(row && row['Comment Text'] || '').trim();
+  if (!text) {
+    text = 'Comment text was not available in the raw Zendesk row';
+  }
+  text = text.replace(/\s+/g, ' ').trim();
+  if (text.length > 220) {
+    text = text.slice(0, 217) + '...';
+  }
+  return text;
+}
+
+function buildUsefulReportNotes_(notes, openTicketNotes) {
+  var useful = [];
+  if (openTicketNotes) {
+    useful.push(openTicketNotes);
+  }
+  if (/missing attendance/i.test(notes)) {
+    useful.push('Missing attendance data');
+  }
+  if (/no ticket activity/i.test(notes)) {
+    useful.push('No ticket activity');
+  }
+  return uniqueValues_(useful).join('; ');
+}
+
+function buildFinalWfmBalanceMap_() {
+  var records = getSheetData(SHEET_NAMES.WFM_MONTHLY_BALANCE);
+  var map = {};
+  for (var i = 0; i < records.length; i++) {
+    map[String(records[i]['Fiscal Month'] || '') + '|' + normalizeEmail_(records[i]['Agent Email'])] = records[i];
+  }
+  return map;
+}
+
+function getLatestWfmUploadFreshness_() {
+  var rows = getSheetData(SHEET_NAMES.WFM_UPLOAD_HISTORY);
+  var latest = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i]['Imported At']) {
+      continue;
+    }
+    var importedAt = parseDate_(rows[i]['Imported At']);
+    if (!latest || importedAt.getTime() > latest.getTime()) {
+      latest = importedAt;
+    }
+  }
+  return latest ? formatDateTime_(latest) : 'No WFM upload history found';
+}
+
+function safeJoinText_(parts) {
+  var output = [];
+  for (var i = 0; i < (parts || []).length; i++) {
+    var text = String(parts[i] || '').trim();
+    if (text) {
+      output.push(text);
+    }
+  }
+  return output.join('; ');
 }
 
 function hasValue_(value) {

@@ -245,7 +245,6 @@ function CX_buildSectionHtml_(section) {
     html += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">';
     html += '<thead><tr style="background:#1f4e79;color:#ffffff;">';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Name</th>';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Requester</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Details</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">' + CX_escapeHtml_(taskHeader) + '</th>';
     html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Status</th>';
@@ -256,7 +255,6 @@ function CX_buildSectionHtml_(section) {
       var rowBg = i % 2 === 0 ? '#ffffff' : '#f2f2f2';
       html += '<tr style="background:' + rowBg + ';">';
       html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].name || '') + '</td>';
-      html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].requester || '') + '</td>';
       html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].details || '') + '</td>';
       html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].tasksCompleted || '') + '</td>';
       html += '<td style="padding:9px;border:1px solid #ddd;' + CX_statusStyle_(rows[i].status || '') + '">' + CX_escapeHtml_(rows[i].status || '') + '</td>';
@@ -320,6 +318,8 @@ function CX_calculateReportTotals_(rows) {
   var totals = {
     agents: rows.length,
     ticketsSolved: 0,
+    ticketsCreated: 0,
+    commentedTickets: 0,
     openTicketFollowUps: 0,
     productiveHours: 0,
     unproductiveHours: 0,
@@ -332,6 +332,8 @@ function CX_calculateReportTotals_(rows) {
   for (var i = 0; i < rows.length; i++) {
     var notes = String(rows[i][13] || '');
     totals.ticketsSolved += Number(rows[i][9] || 0);
+    totals.ticketsCreated += Number(rows[i][18] || 0);
+    totals.commentedTickets += Number(rows[i][19] || 0);
     totals.openTicketFollowUps += Number(rows[i][14] || 0);
     totals.productiveHours += Number(rows[i][10] || 0);
     totals.unproductiveHours += Number(rows[i][11] || 0);
@@ -362,7 +364,7 @@ function CX_buildReportSummary_(aiSummary, rows, totals, reportType) {
   }
   return {
     overall: overall,
-    highlights: 'Agents reviewed: ' + totals.agents + '. Tickets solved: ' + totals.ticketsSolved + '. Open tickets with notes: ' + totals.openTicketFollowUps + '.',
+    highlights: 'Agents reviewed: ' + totals.agents + '. Tickets solved: ' + totals.ticketsSolved + '. Commented tickets: ' + totals.commentedTickets + '. In-progress tickets: ' + totals.openTicketFollowUps + '.',
     risks: totals.reviewFlags ? (totals.reviewFlags + ' row(s) contain review notes. Missing attendance: ' + totals.missingAttendance + '. No ticket activity: ' + totals.noTicketActivity + '. Open ticket follow-up: ' + totals.openTicketFollowUps + '.') : 'No exception notes were flagged in the current report view.',
     followUp: 'Review rows marked as ' + followUpTargets + ' before sending management conclusions.'
   };
@@ -372,7 +374,8 @@ function CX_buildReportMetrics_(totals, reportType) {
   var metrics = [
     { label: 'Agents Reviewed', value: totals.agents, note: 'Current report rows' },
     { label: 'Tickets Solved', value: totals.ticketsSolved, note: 'Zendesk output' },
-    { label: 'In Progress', value: totals.openTicketFollowUps, note: 'Open tickets with notes' },
+    { label: 'Commented Tickets', value: totals.commentedTickets, note: 'Unique tickets with comments/notes' },
+    { label: 'In Progress', value: totals.openTicketFollowUps, note: 'Open commented tickets' },
     { label: 'Review Flags', value: totals.reviewFlags, note: 'Rows with notes' }
   ];
 
@@ -437,6 +440,8 @@ function CX_buildShiftComparisonEmailRows_(rows) {
 
     group.agents += 1;
     group.ticketsSolved += Number(rows[j][9] || 0);
+    group.ticketsCreated += Number(rows[j][18] || 0);
+    group.commentedTickets += Number(rows[j][19] || 0);
     group.inProgressTickets += Number(rows[j][14] || 0);
     group.productiveHours += Number(rows[j][10] || 0);
     group.unproductiveHours += Number(rows[j][11] || 0);
@@ -459,17 +464,17 @@ function CX_buildShiftComparisonEmailRows_(rows) {
     rowsOut.push({
       name: item.shift + ' Shift',
       stream: 'Shift Comparison',
-      requester: item.agents + ' agent(s)',
       details: [
-        'Attendance avg: ' + CX_formatPercent_(attendanceAverage),
-        'Tickets solved: ' + item.ticketsSolved,
-        'Open-ticket notes: ' + item.inProgressTickets,
-        'Productive hours: ' + round2_(item.productiveHours),
-        'Unproductive hours: ' + round2_(item.unproductiveHours)
+        item.agents + ' agent(s) reviewed',
+        'attendance avg ' + CX_formatPercent_(attendanceAverage),
+        item.missingAttendance + ' missing attendance',
+        item.ticketsSolved + ' solved',
+        item.commentedTickets + ' commented',
+        item.inProgressTickets + ' in progress'
       ].join('. ') + '.',
       status: item.agents ? (item.flags || item.inProgressTickets ? 'In progress' : 'Completed') : 'No productivity recorded',
-      tasksCompleted: item.ticketsSolved,
-      notes: item.agents ? (item.flags + ' review flag(s); ' + item.missingAttendance + ' missing attendance row(s); ' + item.inProgressTickets + ' open ticket note(s).') : 'No rows found for this shift in the selected period.'
+      tasksCompleted: item.ticketsSolved + ' solved / ' + item.commentedTickets + ' commented',
+      notes: item.agents ? (item.flags + ' review flag(s).') : 'No rows found for this shift in the selected period.'
     });
   }
 
@@ -483,6 +488,8 @@ function CX_emptyShiftSummary_(shift) {
     attendanceTotal: 0,
     attendanceCount: 0,
     ticketsSolved: 0,
+    ticketsCreated: 0,
+    commentedTickets: 0,
     inProgressTickets: 0,
     productiveHours: 0,
     unproductiveHours: 0,
@@ -527,14 +534,16 @@ function CX_buildZendeskEmailRows_(rows) {
 
   for (var i = 0; i < copy.length; i++) {
     var inProgressTickets = Number(copy[i][14] || 0);
-    var status = inProgressTickets > 0 ? 'In progress' : (Number(copy[i][9] || 0) > 0 ? 'Completed' : 'No productivity recorded');
+    var solved = Number(copy[i][9] || 0);
+    var created = Number(copy[i][18] || 0);
+    var commented = Number(copy[i][19] || 0);
+    var status = inProgressTickets > 0 ? 'In progress' : ((solved || commented || created) ? 'Completed' : 'No productivity recorded');
     output.push({
       name: copy[i][6] || '',
-      requester: copy[i][5] || '',
-      details: 'Tickets solved: ' + Number(copy[i][9] || 0) + '. Open-ticket notes: ' + inProgressTickets + '. Attendance: ' + CX_formatPercent_(copy[i][8]) + '.',
+      details: 'Solved: ' + solved + '. Created: ' + created + '. Commented tickets: ' + commented + '. In progress: ' + inProgressTickets + '.',
       status: status,
-      tasksCompleted: Number(copy[i][9] || 0),
-      notes: CX_joinNotes_(copy[i][15], copy[i][13])
+      tasksCompleted: solved + ' solved / ' + commented + ' commented',
+      notes: CX_joinNotes_(copy[i][20], copy[i][15], copy[i][13])
     });
   }
   return output;
@@ -556,15 +565,10 @@ function CX_buildShiftRosterEmailRows_(rows) {
     var shift = copy[i][7] || 'Unassigned';
     output.push({
       name: copy[i][6] || agent.name || '',
-      requester: copy[i][5] || agent.email || '',
-      details: [
-        'Team: ' + CX_valueOrDash_(agent.team),
-        'Site: ' + CX_valueOrDash_(agent.site),
-        'Role: ' + CX_valueOrDash_(agent.role)
-      ].join('. ') + '.',
+      details: 'Assigned to ' + shift + ' shift.',
       status: copy[i][16] || (Number(copy[i][14] || 0) > 0 ? 'In progress' : 'Completed'),
       tasksCompleted: shift,
-      notes: copy[i][15] || ('Assigned to ' + shift + ' shift.')
+      notes: copy[i][20] || copy[i][15] || ''
     });
   }
 
@@ -631,11 +635,10 @@ function CX_buildAttendanceEmailRows_(rows) {
     if (isMissing || isBelowExpected || hasAttendanceNote) {
       output.push({
         name: rows[i][6] || '',
-        requester: rows[i][5] || '',
-        details: 'Attendance score: ' + CX_formatPercent_(attendanceValue) + '. Shift: ' + (rows[i][7] || 'Unassigned') + '.',
+        details: 'Attendance score: ' + CX_formatPercent_(attendanceValue) + '. Shift: ' + (rows[i][7] || 'Unassigned') + '. Status: ' + CX_valueOrDash_(rows[i][17]) + '.',
         status: isMissing || attendanceNumber === 0 ? 'No productivity recorded' : 'In progress',
         tasksCompleted: isMissing ? 0 : CX_formatPercent_(attendanceValue),
-        notes: notes || 'Attendance below expected.'
+        notes: rows[i][20] || notes || 'Attendance below expected.'
       });
     }
   }
@@ -646,14 +649,13 @@ function CX_buildWfmEmailRows_(rows, reportType) {
   var output = [];
   for (var i = 0; i < rows.length; i++) {
     var notes = String(rows[i][13] || '');
-    if (String(reportType || '').toLowerCase() === 'monthly' || /wfm|outstanding/i.test(notes) || rows[i][10] !== '' || rows[i][11] !== '') {
+    if (String(reportType || '').toLowerCase() === 'monthly' && (rows[i][21] !== '' || rows[i][22] !== '' || /wfm|outstanding/i.test(notes))) {
       output.push({
         name: rows[i][6] || '',
-        requester: rows[i][5] || '',
-        details: 'Productive hours: ' + CX_valueOrDash_(rows[i][10]) + '. Unproductive hours: ' + CX_valueOrDash_(rows[i][11]) + '. Productivity: ' + CX_formatPercent_(rows[i][12]) + '.',
-        status: /wfm|outstanding|missing/i.test(notes) ? 'In progress' : 'Completed',
-        tasksCompleted: CX_valueOrDash_(rows[i][10]),
-        notes: notes || 'No WFM exception flagged.'
+        details: 'WFM total hours: ' + CX_valueOrDash_(rows[i][21]) + '. Outstanding hours: ' + CX_valueOrDash_(rows[i][22]) + '. Latest WFM upload: ' + CX_valueOrDash_(rows[i][23]) + '.',
+        status: Number(rows[i][22] || 0) > 0 || /wfm|outstanding|missing/i.test(notes) ? 'In progress' : 'Completed',
+        tasksCompleted: CX_valueOrDash_(rows[i][21]),
+        notes: rows[i][20] || notes || 'No WFM exception flagged.'
       });
     }
   }

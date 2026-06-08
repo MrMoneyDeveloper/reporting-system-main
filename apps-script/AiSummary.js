@@ -3,37 +3,58 @@ function buildAiPayload(finalDataset) {
   var shiftSummary = {};
   var exceptions = [];
   var topCandidates = [];
+  var totals = {
+    agents_reviewed: rows.length,
+    tickets_solved: 0,
+    tickets_created: 0,
+    commented_tickets: 0,
+    in_progress_tickets: 0,
+    review_flags: 0,
+    missing_attendance: 0
+  };
 
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
     var shift = row[7] || 'Unknown';
     if (!shiftSummary[shift]) {
-      shiftSummary[shift] = { shift: shift, attendanceRate: 0, attendanceCount: 0, productivityRate: 0, productivityCount: 0, ticketsSolved: 0 };
+      shiftSummary[shift] = { shift: shift, agents: 0, attendanceRate: 0, attendanceCount: 0, ticketsSolved: 0, ticketsCreated: 0, commentedTickets: 0, inProgressTickets: 0, reviewFlags: 0, missingAttendance: 0 };
     }
+    shiftSummary[shift].agents += 1;
 
     if (row[8] !== '') {
       shiftSummary[shift].attendanceRate += Number(row[8]);
       shiftSummary[shift].attendanceCount += 1;
     }
-    if (row[12] !== '') {
-      shiftSummary[shift].productivityRate += Number(row[12]);
-      shiftSummary[shift].productivityCount += 1;
-    }
     shiftSummary[shift].ticketsSolved += Number(row[9] || 0);
+    shiftSummary[shift].ticketsCreated += Number(row[18] || 0);
+    shiftSummary[shift].commentedTickets += Number(row[19] || 0);
+    shiftSummary[shift].inProgressTickets += Number(row[14] || 0);
+
+    totals.tickets_solved += Number(row[9] || 0);
+    totals.tickets_created += Number(row[18] || 0);
+    totals.commented_tickets += Number(row[19] || 0);
+    totals.in_progress_tickets += Number(row[14] || 0);
 
     if (row[13]) {
+      totals.review_flags += 1;
+      if (/missing attendance/i.test(String(row[13] || ''))) {
+        totals.missing_attendance += 1;
+        shiftSummary[shift].missingAttendance += 1;
+      }
+      shiftSummary[shift].reviewFlags += 1;
       exceptions.push({
         agent: row[6],
-        email: row[5],
         issue: row[13],
-        productivity: row[12]
+        status: row[16],
+        useful_notes: row[20] || row[15] || ''
       });
     }
 
     topCandidates.push({
       agent: row[6],
       tickets: Number(row[9] || 0),
-      productivity: Number(row[12] || 0)
+      commented_tickets: Number(row[19] || 0),
+      in_progress_tickets: Number(row[14] || 0)
     });
   }
 
@@ -45,14 +66,19 @@ function buildAiPayload(finalDataset) {
     var group = shiftSummary[shiftName];
     shiftRows.push({
       shift: group.shift,
+      agents_reviewed: group.agents,
       attendance_rate: group.attendanceCount ? round2_(group.attendanceRate / group.attendanceCount) : '',
-      productivity_rate: group.productivityCount ? round2_(group.productivityRate / group.productivityCount) : '',
-      tickets_solved: group.ticketsSolved
+      tickets_solved: group.ticketsSolved,
+      tickets_created: group.ticketsCreated,
+      commented_tickets: group.commentedTickets,
+      in_progress_tickets: group.inProgressTickets,
+      missing_attendance: group.missingAttendance,
+      review_flags: group.reviewFlags
     });
   }
 
   topCandidates.sort(function (left, right) {
-    return (right.tickets + right.productivity) - (left.tickets + left.productivity);
+    return (right.tickets + right.commented_tickets) - (left.tickets + left.commented_tickets);
   });
 
   return {
@@ -61,6 +87,7 @@ function buildAiPayload(finalDataset) {
     period_end: rows.length ? rows[0][2] : '',
     fiscal_week: rows.length ? rows[0][3] : '',
     fiscal_month: rows.length ? rows[0][4] : '',
+    totals: totals,
     shift_summary: shiftRows,
     agent_exceptions: exceptions.slice(0, 20),
     top_performers: topCandidates.slice(0, 5)
@@ -82,7 +109,8 @@ function generateAiSummary(payload) {
   var prompt = [
     'You are summarizing a support productivity report for managers.',
     'Use concise business language. Mention risks, notable wins, missing data, and next actions.',
-    'Only use the JSON data below; do not invent facts.',
+    'The JSON already contains calculated report metrics. Do not recalculate, estimate, or invent totals.',
+    'Only use the JSON data below; if a metric is absent, say it is not available.',
     JSON.stringify(payload || {})
   ].join('\n\n');
 

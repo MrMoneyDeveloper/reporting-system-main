@@ -317,6 +317,7 @@ function buildDailyAgentMetricRowsForDay_(operationalDate) {
     var productivityActions = sumMetricColumn_(tickets, 13);
     var inProgressTickets = sumMetricColumn_(tickets, 14);
     var openTicketNotes = uniqueMetricValues_(tickets, 15).join('; ');
+    var commentedTickets = sumMetricColumn_(tickets, 16);
     var notes = buildDailyMetricNotes_(attendance, tickets, inProgressTickets, openTicketNotes);
 
     output.push([
@@ -342,7 +343,8 @@ function buildDailyAgentMetricRowsForDay_(operationalDate) {
       inProgressTickets,
       openTicketNotes,
       notes,
-      updatedAt
+      updatedAt,
+      commentedTickets
     ]);
   }
 
@@ -417,6 +419,7 @@ function createRollupGroup_(periodKey, startDate, endDate, fiscalMonth, seedRow)
     ticketScore: 0,
     productivityActions: 0,
     inProgressTickets: 0,
+    commentedTickets: 0,
     openTicketNotes: {},
     missingAttendanceDays: 0,
     noTicketDays: 0
@@ -446,6 +449,7 @@ function addDailyMetricToRollupGroup_(group, row) {
   group.ticketScore += Number(row['Ticket Score'] || 0);
   group.productivityActions += Number(row['Productivity Actions'] || 0);
   group.inProgressTickets += Number(row['In Progress Tickets'] || 0);
+  group.commentedTickets += Number(row['Commented Tickets'] || 0);
   if (row['Open Ticket Notes']) {
     group.openTicketNotes[String(row['Open Ticket Notes'])] = true;
   }
@@ -491,7 +495,8 @@ function rollupGroupsToRows_(groups, type) {
         group.inProgressTickets,
         openTicketNotes,
         notes,
-        updatedAt
+        updatedAt,
+        group.commentedTickets
       ]);
     } else {
       var wfm = wfmMap[group.periodKey + '|' + group.email] || {};
@@ -523,7 +528,8 @@ function rollupGroupsToRows_(groups, type) {
         wfm['Surplus Hours'] || '',
         wfm.Notes || '',
         notes,
-        updatedAt
+        updatedAt,
+        group.commentedTickets
       ]);
     }
   }

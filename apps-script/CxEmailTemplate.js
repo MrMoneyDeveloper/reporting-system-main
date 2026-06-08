@@ -350,17 +350,16 @@ function CX_buildReportMetrics_(totals) {
 }
 
 function CX_buildReportSections_(rows, reportType) {
-  return [
+  var sections = [
     {
       title: 'Shift Comparison',
       stream: 'Shift Comparison',
       rows: CX_buildShiftComparisonEmailRows_(rows)
     },
-    {
-      title: 'Zendesk Ticket Output',
-      stream: 'Zendesk',
-      rows: CX_buildZendeskEmailRows_(rows).slice(0, 25)
-    },
+  ];
+
+  sections = sections.concat(CX_buildZendeskShiftSections_(rows));
+  sections = sections.concat([
     {
       title: 'Attendance Review',
       stream: 'Attendance',
@@ -371,7 +370,9 @@ function CX_buildReportSections_(rows, reportType) {
       stream: 'WFM',
       rows: CX_buildWfmEmailRows_(rows, reportType).slice(0, 25)
     }
-  ];
+  ]);
+
+  return sections;
 }
 
 function CX_buildShiftComparisonEmailRows_(rows) {
@@ -477,6 +478,52 @@ function CX_buildZendeskEmailRows_(rows) {
     });
   }
   return output;
+}
+
+function CX_buildZendeskShiftSections_(rows) {
+  var grouped = CX_groupRowsByShift_(rows);
+  var sections = [];
+  var order = ['Day', 'Mid', 'Night'];
+
+  for (var i = 0; i < order.length; i++) {
+    sections.push({
+      title: 'Zendesk Ticket Output - ' + order[i] + ' Shift',
+      stream: 'Zendesk',
+      rows: CX_buildZendeskEmailRows_(grouped[order[i]] || []).slice(0, 25)
+    });
+  }
+
+  var extraShifts = Object.keys(grouped).filter(function (shift) {
+    return order.indexOf(shift) === -1 && (grouped[shift] || []).length;
+  }).sort();
+
+  for (var j = 0; j < extraShifts.length; j++) {
+    sections.push({
+      title: 'Zendesk Ticket Output - ' + extraShifts[j] + ' Shift',
+      stream: 'Zendesk',
+      rows: CX_buildZendeskEmailRows_(grouped[extraShifts[j]] || []).slice(0, 25)
+    });
+  }
+
+  return sections;
+}
+
+function CX_groupRowsByShift_(rows) {
+  var grouped = {
+    Day: [],
+    Mid: [],
+    Night: []
+  };
+
+  for (var i = 0; i < (rows || []).length; i++) {
+    var shift = CX_normalizeShiftName_(rows[i][7]);
+    if (!grouped[shift]) {
+      grouped[shift] = [];
+    }
+    grouped[shift].push(rows[i]);
+  }
+
+  return grouped;
 }
 
 function CX_buildAttendanceEmailRows_(rows) {

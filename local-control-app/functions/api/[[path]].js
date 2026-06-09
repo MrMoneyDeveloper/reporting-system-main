@@ -329,7 +329,7 @@ function buildReportCsv(metrics, filters) {
   addSection(output, 'Shift Comparison', buildShiftSummaryRows(metrics.charts && metrics.charts.shiftSummary));
   addSection(output, 'Shift Roster', buildShiftRosterRows(rows));
   addSection(output, 'Zendesk Ticket Output', buildZendeskRows(rows));
-  addSection(output, 'Attendance Review', buildAttendanceRows(rows));
+  addSection(output, 'Attendance Review', buildAttendanceRows(rows), ['Shift', 'Name', 'Status']);
 
   if ((activeFilters.periodType || '').toLowerCase() === 'monthly') {
     addSection(output, 'WFM Balance Review', buildWfmRows(rows));
@@ -340,10 +340,10 @@ function buildReportCsv(metrics, filters) {
   return output.map(toCsvLine).join('\r\n');
 }
 
-function addSection(output, title, rows) {
+function addSection(output, title, rows, headers) {
   output.push([]);
   output.push([title]);
-  output.push(['Shift', 'Name', 'Details', 'Tasks/Productivity', 'Status', 'Notes']);
+  output.push(headers || ['Shift', 'Name', 'Details', 'Tasks/Productivity', 'Status', 'Notes']);
   rows.forEach((row) => output.push(row));
 }
 
@@ -376,18 +376,15 @@ function buildZendeskRows(rows) {
     `Created ${row.ticketsCreated || 0}; solved ${row.ticketsSolved || 0}; commented ${row.commentedTickets || 0}; in progress ${row.inProgressTickets || 0}`,
     `Solved ${row.ticketsSolved || 0}; commented ${row.commentedTickets || 0}`,
     getTicketFollowUpStatus(row),
-    row.openTicketNotes || row.notes || ''
+    row.openTicketNotes || ''
   ]);
 }
 
 function buildAttendanceRows(rows) {
-  return sortByShift(rows).filter((row) => isAttendanceException(row)).map((row) => [
+  return sortByShift(rows).map((row) => [
     row.shift || 'Unassigned',
     row.agentName || '',
-    `Status: ${getAttendanceReviewStatus(row)}`,
-    '',
-    getAttendanceReviewStatus(row),
-    ''
+    getAttendanceReviewStatus(row)
   ]);
 }
 
@@ -411,23 +408,6 @@ function buildRiskRows(rows) {
     row.inProgressTickets ? 'In progress' : 'Needs review',
     row.openTicketNotes || (row.wfmOutstandingHours ? `WFM outstanding ${formatNumber(row.wfmOutstandingHours)}h` : '')
   ]);
-}
-
-function isAttendanceException(row) {
-  const status = String(row.attendanceStatus || '').toLowerCase();
-  if (row.attendancePercent === '' || !status) return true;
-  if (row.attendancePercent === '' || status.includes('missing')) return true;
-  if (status.includes('late') ||
-      status.includes('absent') ||
-      status.includes('awol') ||
-      status.includes('sick') ||
-      status.includes('study leave') ||
-      status.includes('family leave') ||
-      status.includes('family responsibility') ||
-      status.includes('holiday') ||
-      status.includes('not scheduled') ||
-      status.includes('partial')) return true;
-  return false;
 }
 
 function getAttendanceReviewStatus(row) {

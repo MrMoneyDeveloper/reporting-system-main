@@ -229,7 +229,13 @@ function CX_buildSectionsHtml_(sections) {
 function CX_buildSectionHtml_(section) {
   section = section || {};
   var rows = section.rows || [];
-  var taskHeader = section.taskHeader || 'Tasks/Productivity';
+  var columns = section.columns || [
+    { key: 'name', label: 'Name' },
+    { key: 'details', label: 'Details' },
+    { key: 'tasksCompleted', label: section.taskHeader || 'Tasks/Productivity' },
+    { key: 'status', label: 'Status' },
+    { key: 'notes', label: 'Notes' }
+  ];
   var html = '';
 
   html += '<tr><td style="padding:14px 26px;">';
@@ -244,21 +250,20 @@ function CX_buildSectionHtml_(section) {
   } else {
     html += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">';
     html += '<thead><tr style="background:#1f4e79;color:#ffffff;">';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Name</th>';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Details</th>';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">' + CX_escapeHtml_(taskHeader) + '</th>';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Status</th>';
-    html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">Notes</th>';
+    for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+      html += '<th style="text-align:left;padding:9px;border:1px solid #d5dce5;">' + CX_escapeHtml_(columns[columnIndex].label || '') + '</th>';
+    }
     html += '</tr></thead><tbody>';
 
     for (var i = 0; i < rows.length; i++) {
       var rowBg = i % 2 === 0 ? '#ffffff' : '#f2f2f2';
       html += '<tr style="background:' + rowBg + ';">';
-      html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].name || '') + '</td>';
-      html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].details || '') + '</td>';
-      html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].tasksCompleted || '') + '</td>';
-      html += '<td style="padding:9px;border:1px solid #ddd;' + CX_statusStyle_(rows[i].status || '') + '">' + CX_escapeHtml_(rows[i].status || '') + '</td>';
-      html += '<td style="padding:9px;border:1px solid #ddd;">' + CX_escapeHtml_(rows[i].notes || '') + '</td>';
+      for (var cellIndex = 0; cellIndex < columns.length; cellIndex++) {
+        var column = columns[cellIndex];
+        var value = rows[i][column.key] || '';
+        var style = column.key === 'status' ? CX_statusStyle_(value) : '';
+        html += '<td style="padding:9px;border:1px solid #ddd;' + style + '">' + CX_escapeHtml_(value) + '</td>';
+      }
       html += '</tr>';
     }
 
@@ -405,6 +410,11 @@ function CX_buildReportSections_(rows, reportType) {
   sections.push({
     title: 'Attendance Review',
     stream: 'Attendance',
+    columns: [
+      { key: 'name', label: 'Name' },
+      { key: 'details', label: 'Details' },
+      { key: 'status', label: 'Status' }
+    ],
     rows: CX_buildAttendanceEmailRows_(rows).slice(0, 25)
   });
 
@@ -543,7 +553,7 @@ function CX_buildZendeskEmailRows_(rows) {
       details: 'Solved: ' + solved + '. Created: ' + created + '. Commented tickets: ' + commented + '. In progress: ' + inProgressTickets + '.',
       status: status,
       tasksCompleted: solved + ' solved / ' + commented + ' commented',
-      notes: CX_joinNotes_(copy[i][20], copy[i][15], copy[i][13])
+      notes: copy[i][15] || ''
     });
   }
   return output;
@@ -626,22 +636,14 @@ function CX_buildAttendanceEmailRows_(rows) {
   for (var i = 0; i < rows.length; i++) {
     var attendanceValue = rows[i][8];
     var attendanceStatus = CX_attendanceStatusForReview_(rows[i][17], attendanceValue);
-    var hasAttendance = !(attendanceValue === '' || attendanceValue === null || typeof attendanceValue === 'undefined');
-    var attendanceNumber = hasAttendance ? Number(attendanceValue) : '';
-    var isMissing = !hasAttendance || !attendanceStatus;
-    var isBelowExpected = hasAttendance && !isNaN(attendanceNumber) && attendanceNumber < 1;
-    var shouldShow = isMissing || isBelowExpected || CX_isAttendanceReviewStatus_(attendanceStatus);
-
-    if (shouldShow) {
-      var status = attendanceStatus || 'Missing attendance';
-      output.push({
-        name: rows[i][6] || '',
-        details: 'Shift: ' + (rows[i][7] || 'Unassigned') + '. Status: ' + status + '.',
-        status: status,
-        tasksCompleted: '',
-        notes: ''
-      });
-    }
+    var status = attendanceStatus || 'Missing attendance';
+    output.push({
+      name: rows[i][6] || '',
+      details: 'Shift: ' + (rows[i][7] || 'Unassigned') + '.',
+      status: status,
+      tasksCompleted: '',
+      notes: ''
+    });
   }
   return output;
 }
@@ -661,22 +663,6 @@ function CX_attendanceStatusForReview_(status, attendanceValue) {
     return 'Absent';
   }
   return 'Late';
-}
-
-function CX_isAttendanceReviewStatus_(status) {
-  var value = String(status || '').toLowerCase();
-  return Boolean(
-    value.indexOf('late') !== -1 ||
-    value.indexOf('sick') !== -1 ||
-    value.indexOf('awol') !== -1 ||
-    value.indexOf('absent') !== -1 ||
-    value.indexOf('study leave') !== -1 ||
-    value.indexOf('family leave') !== -1 ||
-    value.indexOf('family responsibility') !== -1 ||
-    value.indexOf('holiday') !== -1 ||
-    value.indexOf('not scheduled') !== -1 ||
-    value.indexOf('missing attendance') !== -1
-  );
 }
 
 function CX_buildWfmEmailRows_(rows, reportType) {

@@ -579,7 +579,7 @@ function parseAttendanceMatrixDateValue_(value, monthInfo) {
 
 function findAttendanceMatrixOnTimeColumn_(headers, attendedColumn) {
   for (var columnIndex = attendedColumn + 1; columnIndex < Math.min(headers.length, attendedColumn + 4); columnIndex++) {
-    if (isAttendanceMatrixOnTimeKey_(normalizeKey_(headers[columnIndex]))) {
+    if (isAttendanceMatrixOnTimeKey_(headers[columnIndex])) {
       return columnIndex;
     }
   }
@@ -615,8 +615,26 @@ function isAttendanceMatrixStatusColumnKey_(key) {
     /^20\d{6}$/.test(key);
 }
 
-function isAttendanceMatrixOnTimeKey_(key) {
-  return key === 'ontime' || key === 'ontimeyes' || key === 'timeous';
+function isAttendanceMatrixOnTimeKey_(header) {
+  var key = normalizeKey_(header);
+  return key === 'ontime' ||
+    key === 'ontimeyes' ||
+    key === 'timeous' ||
+    isAttendanceOver15Header_(header);
+}
+
+function isAttendanceOver15Header_(header) {
+  var text = String(header || '').trim().toLowerCase();
+  var key = normalizeKey_(header);
+  if (text.indexOf('>') !== -1 && text.indexOf('15') !== -1) {
+    return true;
+  }
+  return key === 'over15mins' ||
+    key === 'over15minutes' ||
+    key === 'morethan15mins' ||
+    key === 'morethan15minutes' ||
+    key === 'late15' ||
+    key === 'lateover15';
 }
 
 function buildAttendanceAgentNameMap_() {
@@ -636,6 +654,9 @@ function buildAttendanceAgentNameMap_() {
 
 function getAttendanceMatrixStatus_(attendedValue, onTimeValue) {
   var selectedStatus = normalizeAttendanceStatusValue_(attendedValue);
+  if (shouldOverrideAttendanceStatusToLate_(selectedStatus, onTimeValue)) {
+    return 'Late';
+  }
   if (selectedStatus) {
     return selectedStatus;
   }
@@ -818,12 +839,13 @@ function mapAttendanceSourceRows_(rows, startDate, endDate) {
 
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
+    var status = deriveAttendanceStatusFromSourceRow_(row);
     output.push([
       resolveAttendanceDate_(row, startDate, endDate),
       pickAttendanceValue_(row, ['Shift', 'shift']),
       pickAttendanceValue_(row, ['Agent Name', 'Agent name', 'Name', 'Agent', 'Employee', 'Staff Member', 'Teammate']),
       pickAttendanceValue_(row, ['Email', 'Agent Email', 'Agent email', 'email', 'Email Address', 'Work Email']),
-      pickAttendanceValue_(row, ['Status', 'Attendance Status', 'Attendance status', 'Attendance']),
+      status,
       pickAttendanceValue_(row, ['Scheduled Start', 'Scheduled start', 'Schedule Start']),
       pickAttendanceValue_(row, ['Scheduled End', 'Scheduled end', 'Schedule End']),
       pickAttendanceValue_(row, ['Actual Start', 'Actual start', 'Clock In', 'Clock in']),
@@ -833,6 +855,77 @@ function mapAttendanceSourceRows_(rows, startDate, endDate) {
   }
 
   return output;
+}
+
+function deriveAttendanceStatusFromSourceRow_(row) {
+  var rawStatus = pickAttendanceValue_(row, ['Status', 'Attendance Status', 'Attendance status', 'Attendance']);
+  var status = normalizeAttendanceStatusValue_(rawStatus) || String(rawStatus || '').trim();
+  var over15 = pickAttendanceValue_(row, [
+    '>15 Mins',
+    '> 15 Mins',
+    '>15 Minutes',
+    '> 15 Minutes',
+    'Over 15 Mins',
+    'Over 15 Minutes',
+    'More Than 15 Mins',
+    'More Than 15 Minutes',
+    'Late >15',
+    'Late > 15',
+    'Late Over 15'
+  ]);
+
+  if (shouldOverrideAttendanceStatusToLate_(status, over15)) {
+    return 'Late';
+  }
+  return status;
+}
+
+function shouldOverrideAttendanceStatusToLate_(status, over15Value) {
+  if (!isOver15PunctualityValue_(over15Value)) {
+    return false;
+  }
+
+  var normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'sick' ||
+      normalized === 'study leave' ||
+      normalized === 'family leave' ||
+      normalized === 'family responsibility' ||
+      normalized === 'holiday' ||
+      normalized === 'not scheduled' ||
+      normalized === 'awol') {
+    return false;
+  }
+
+  return true;
+}
+
+function isOver15PunctualityValue_(value) {
+  if (value === null || typeof value === 'undefined' || value === '') {
+    return false;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value > 0;
+  }
+
+  var text = String(value || '').trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+  if (text === 'true' || text === 'yes' || text === 'y' || text === 'late' || text === 'x') {
+    return true;
+  }
+  if (text === 'false' || text === 'no' || text === 'n' || text === '0') {
+    return false;
+  }
+
+  var numberMatch = text.match(/\d+(\.\d+)?/);
+  if (numberMatch && Number(numberMatch[0]) > 0) {
+    return true;
+  }
+  return text.indexOf('>15') !== -1 || text.indexOf('over 15') !== -1 || text.indexOf('more than 15') !== -1;
 }
 
 function resolveAttendanceDate_(row, startDate, endDate) {
@@ -1020,6 +1113,9 @@ function normalizeAttendance(rows) {
     var expectedHours = calculateExpectedHours_(attendanceDate, row['Scheduled Start'], row['Scheduled End'], row.Shift);
     var actualHours = calculateActualHours_(attendanceDate, row['Actual Start'], row['Actual End']);
     var lateMinutes = calculateLateMinutes_(attendanceDate, row['Scheduled Start'], row['Actual Start']);
+    if (lateMinutes > 15 && shouldOverrideAttendanceStatusToLate_(status, true)) {
+      status = 'Late';
+    }
     var score = getAttendanceScore_(status, row.Notes);
 
     normalizedRows.push([

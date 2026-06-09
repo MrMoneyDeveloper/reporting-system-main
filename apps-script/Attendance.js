@@ -258,17 +258,19 @@ function readAttendanceSheetRecords_(sheet) {
     return [];
   }
 
-  var values = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
-  var headerInfo = detectAttendanceHeaderRow_(values);
+  var range = sheet.getRange(1, 1, lastRow, lastColumn);
+  var values = range.getValues();
+  var displayValues = range.getDisplayValues();
+  var headerInfo = detectAttendanceHeaderRow_(displayValues);
   if (!headerInfo) {
     return [];
   }
 
   if (isAttendanceMatrixHeader_(headerInfo.headers)) {
-    return attendanceMatrixRecordsFromValues_(values, headerInfo, sheet.getName());
+    return attendanceMatrixRecordsFromValues_(values, displayValues, headerInfo, sheet.getName());
   }
 
-  return attendanceRecordsFromValues_(values, headerInfo.rowIndex, headerInfo.headers, sheet.getName());
+  return attendanceRecordsFromValues_(values, displayValues, headerInfo.rowIndex, headerInfo.headers, sheet.getName());
 }
 
 function inspectAttendanceSheet_(sheet) {
@@ -283,15 +285,18 @@ function inspectAttendanceSheet_(sheet) {
     };
   }
 
-  var values = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
-  var headerInfo = detectAttendanceHeaderRow_(values);
+  var range = sheet.getRange(1, 1, lastRow, lastColumn);
+  var values = range.getValues();
+  var displayValues = range.getDisplayValues();
+  var headerInfo = detectAttendanceHeaderRow_(displayValues);
   var isMatrix = headerInfo ? isAttendanceMatrixHeader_(headerInfo.headers) : false;
   var records = headerInfo
     ? (isMatrix
-      ? attendanceMatrixRecordsFromValues_(values, headerInfo, sheet.getName())
-      : attendanceRecordsFromValues_(values, headerInfo.rowIndex, headerInfo.headers, sheet.getName()))
+      ? attendanceMatrixRecordsFromValues_(values, displayValues, headerInfo, sheet.getName())
+      : attendanceRecordsFromValues_(values, displayValues, headerInfo.rowIndex, headerInfo.headers, sheet.getName()))
     : [];
 
+  var statusDiagnostics = buildAttendanceStatusDiagnostics_(records);
   return {
     tab: sheet.getName(),
     rows: lastRow,
@@ -301,7 +306,11 @@ function inspectAttendanceSheet_(sheet) {
     headers: headerInfo ? headerInfo.headers : [],
     sampleRecord: records.length ? records[0] : {},
     mappedSample: records.length ? mapAttendanceSourceRows_([records[0]])[0] : [],
-    mappedSamples: records.length ? mapAttendanceSourceRows_(records.slice(0, 3)) : []
+    mappedSamples: records.length ? mapAttendanceSourceRows_(records.slice(0, 3)) : [],
+    sourceStatusCounts: statusDiagnostics.sourceStatusCounts,
+    rawStatusCounts: statusDiagnostics.rawStatusCounts,
+    statusWarning: statusDiagnostics.warning,
+    namedSamples: buildAttendanceNamedInspectionSamples_(records)
   };
 }
 
@@ -353,7 +362,131 @@ function buildAttendanceInspectTabMessage_(tab, sample) {
     ', sampleShift=' + safeAttendanceText_(mapped[1]) +
     ', sampleName=' + safeAttendanceText_(mapped[2]) +
     ', sampleEmail=' + safeAttendanceText_(mapped[3]) +
-    ', sampleStatus=' + safeAttendanceText_(mapped[4]) + '.';
+    ', sampleStatus=' + safeAttendanceText_(mapped[4]) +
+    ', sourceStatusCounts=' + safeAttendanceText_(formatAttendanceStatusCounts_(tab.sourceStatusCounts)) +
+    ', rawStatusCounts=' + safeAttendanceText_(formatAttendanceStatusCounts_(tab.rawStatusCounts)) +
+    ', namedSamples=' + safeAttendanceText_(formatAttendanceNamedSamples_(tab.namedSamples)) +
+    (tab.statusWarning ? ', warning=' + tab.statusWarning : '') + '.';
+}
+
+function buildAttendanceStatusDiagnostics_(records) {
+  var sourceCounts = {};
+  var rawCounts = {};
+  var sawNonBinarySource = false;
+  var sawOnlyBinaryRaw = false;
+
+  for (var i = 0; i < (records || []).length; i++) {
+    var row = records[i];
+    var sourceStatus = extractAttendanceImportNoteValue_(row.Notes, 'Source display status') ||
+      extractAttendanceImportNoteValue_(row.Notes, 'Source status') ||
+      row.Status ||
+      '';
+    var rawStatus = deriveAttendanceStatusFromSourceRow_(row);
+    incrementAttendanceStatusCount_(sourceCounts, sourceStatus);
+    incrementAttendanceStatusCount_(rawCounts, rawStatus);
+  }
+
+  sawNonBinarySource = attendanceStatusCountsHaveNonBinary_(sourceCounts);
+  sawOnlyBinaryRaw = attendanceStatusCountsAreOnlyBinary_(rawCounts);
+
+  return {
+    sourceStatusCounts: sourceCounts,
+    rawStatusCounts: rawCounts,
+    warning: sawNonBinarySource && sawOnlyBinaryRaw
+      ? 'Only Attended/Absent raw statuses detected while source display has other dropdown values.'
+      : ''
+  };
+}
+
+function buildAttendanceNamedInspectionSamples_(records) {
+  var wanted = {
+    motlalepuleleratoivykhauta: true,
+    lindekabele: true
+  };
+  var output = [];
+
+  for (var i = 0; i < (records || []).length; i++) {
+    var row = records[i];
+    var name = String(row['Agent Name'] || '').trim();
+    if (!wanted[normalizeKey_(name)]) {
+      continue;
+    }
+    output.push({
+      name: name,
+      date: row.Date || '',
+      shift: row.Shift || '',
+      sourceDisplayStatus: extractAttendanceImportNoteValue_(row.Notes, 'Source display status') || row.Status || '',
+      under15: extractAttendanceImportNoteValue_(row.Notes, 'Under 15'),
+      over15: extractAttendanceImportNoteValue_(row.Notes, 'Over 15'),
+      rawStatus: deriveAttendanceStatusFromSourceRow_(row)
+    });
+    if (output.length >= 8) {
+      break;
+    }
+  }
+
+  return output;
+}
+
+function incrementAttendanceStatusCount_(counts, status) {
+  var value = normalizeAttendanceStatusValue_(status) || String(status || '').trim() || '(blank)';
+  counts[value] = Number(counts[value] || 0) + 1;
+}
+
+function attendanceStatusCountsHaveNonBinary_(counts) {
+  for (var status in counts) {
+    if (!Object.prototype.hasOwnProperty.call(counts, status)) {
+      continue;
+    }
+    if (!isBinaryAttendanceStatusLabel_(status)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function attendanceStatusCountsAreOnlyBinary_(counts) {
+  var total = 0;
+  for (var status in counts) {
+    if (!Object.prototype.hasOwnProperty.call(counts, status)) {
+      continue;
+    }
+    total += Number(counts[status] || 0);
+    if (!isBinaryAttendanceStatusLabel_(status)) {
+      return false;
+    }
+  }
+  return total > 0;
+}
+
+function isBinaryAttendanceStatusLabel_(status) {
+  var normalized = String(status || '').trim().toLowerCase();
+  return normalized === 'attended' ||
+    normalized === 'present' ||
+    normalized === 'absent' ||
+    normalized === '(blank)';
+}
+
+function formatAttendanceStatusCounts_(counts) {
+  var parts = [];
+  var keys = Object.keys(counts || {}).sort();
+  for (var i = 0; i < keys.length; i++) {
+    parts.push(keys[i] + ':' + counts[keys[i]]);
+  }
+  return parts.join(', ');
+}
+
+function formatAttendanceNamedSamples_(samples) {
+  var parts = [];
+  for (var i = 0; i < (samples || []).length; i++) {
+    var sample = samples[i];
+    parts.push(sample.name + ' ' + safeAttendanceDateLabel_(sample.date) +
+      ' source=' + safeAttendanceText_(sample.sourceDisplayStatus) +
+      ' under15=' + safeAttendanceText_(sample.under15) +
+      ' over15=' + safeAttendanceText_(sample.over15) +
+      ' raw=' + safeAttendanceText_(sample.rawStatus));
+  }
+  return parts.join(' | ');
 }
 
 function buildAttendanceNoMatchDebugMessage_(sourceRows, mappedRows, startDate, endDate) {
@@ -450,7 +583,7 @@ function isAttendanceMatrixHeader_(headers) {
     if (key === 'shift') {
       hasShift = true;
     }
-    if (isAttendanceMatrixStatusColumnKey_(key)) {
+    if (isAttendanceMatrixStatusColumn_(headers[i])) {
       attendanceColumnCount += 1;
     }
   }
@@ -458,10 +591,10 @@ function isAttendanceMatrixHeader_(headers) {
   return hasAgentName && hasShift && attendanceColumnCount >= 2;
 }
 
-function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
+function attendanceMatrixRecordsFromValues_(values, displayValues, headerInfo, sheetName) {
   var headers = headerInfo.headers || [];
   var headerRowIndex = headerInfo.rowIndex;
-  var matrixColumns = getAttendanceMatrixColumns_(headers, values, headerRowIndex, sheetName);
+  var matrixColumns = getAttendanceMatrixColumns_(headers, values, displayValues, headerRowIndex, sheetName);
   var agentNameIndex = findAttendanceHeaderIndex_(headers, ['agentname', 'agent', 'name', 'employee', 'staffmember']);
   var shiftIndex = findAttendanceHeaderIndex_(headers, ['shift']);
   var emailIndex = findAttendanceHeaderIndex_(headers, ['email', 'agentemail', 'emailaddress', 'workemail']);
@@ -474,27 +607,29 @@ function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
 
   for (var rowIndex = headerRowIndex + 1; rowIndex < values.length; rowIndex++) {
     var row = values[rowIndex];
-    if (!rowHasValue_(row)) {
+    var displayRow = (displayValues && displayValues[rowIndex]) || [];
+    if (!rowHasValue_(row) && !rowHasValue_(displayRow)) {
       continue;
     }
 
-    var agentName = String(row[agentNameIndex] || '').trim();
+    var agentName = String(row[agentNameIndex] || displayRow[agentNameIndex] || '').trim();
     if (!agentName) {
       continue;
     }
 
     var agent = agentNameMap[normalizeKey_(agentName)] || null;
-    var email = emailIndex >= 0 ? normalizeEmail_(row[emailIndex]) : '';
+    var email = emailIndex >= 0 ? normalizeEmail_(row[emailIndex] || displayRow[emailIndex]) : '';
     if (!email && agent) {
       email = agent.email;
     }
 
     for (var columnIndex = 0; columnIndex < matrixColumns.length; columnIndex++) {
       var column = matrixColumns[columnIndex];
-      var attendedValue = row[column.attendedColumn];
-      var under15Value = column.under15Column >= 0 ? row[column.under15Column] : '';
-      var over15Value = column.over15Column >= 0 ? row[column.over15Column] : '';
-      var status = getAttendanceMatrixStatus_(attendedValue, over15Value);
+      var statusRawValue = row[column.attendedColumn];
+      var statusDisplayValue = displayRow[column.attendedColumn];
+      var under15Value = column.under15Column >= 0 ? preferredAttendanceDisplayValue_(row[column.under15Column], displayRow[column.under15Column]) : '';
+      var over15Value = column.over15Column >= 0 ? preferredAttendanceDisplayValue_(row[column.over15Column], displayRow[column.over15Column]) : '';
+      var status = getAttendanceMatrixStatus_(statusDisplayValue, statusRawValue, over15Value);
 
       if (!status) {
         continue;
@@ -510,7 +645,7 @@ function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
         'Scheduled End': '',
         'Actual Start': '',
         'Actual End': '',
-        Notes: buildAttendanceMatrixImportNote_(sheetName, attendedValue, under15Value, over15Value, status),
+        Notes: buildAttendanceMatrixImportNote_(sheetName, statusDisplayValue, statusRawValue, under15Value, over15Value, status),
         _SourceSheet: sheetName,
         _SourceRow: rowIndex + 1,
         _SourceColumn: column.attendedColumn + 1
@@ -521,32 +656,33 @@ function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
   return records;
 }
 
-function buildAttendanceMatrixImportNote_(sheetName, statusValue, under15Value, over15Value, finalStatus) {
+function buildAttendanceMatrixImportNote_(sheetName, statusDisplayValue, statusRawValue, under15Value, over15Value, finalStatus) {
   return 'Imported from attendance matrix tab "' + sheetName + '". ' +
-    'Source status=' + safeAttendanceText_(statusValue) +
+    'Source display status=' + safeAttendanceText_(statusDisplayValue) +
+    '; Source raw status=' + safeAttendanceText_(statusRawValue) +
     '; Under 15=' + safeAttendanceText_(under15Value) +
     '; Over 15=' + safeAttendanceText_(over15Value) +
     '; Final status=' + safeAttendanceText_(finalStatus) + '.';
 }
 
-function getAttendanceMatrixColumns_(headers, values, headerRowIndex, sheetName) {
+function getAttendanceMatrixColumns_(headers, values, displayValues, headerRowIndex, sheetName) {
   var monthInfo = parseMonthYearFromSheetName_(sheetName, new Date());
   var columns = [];
   var fallbackDay = 1;
   var daysInMonth = monthInfo ? new Date(monthInfo.year, monthInfo.month + 1, 0).getDate() : 31;
 
   for (var columnIndex = 0; columnIndex < headers.length; columnIndex++) {
-    if (!isAttendanceMatrixStatusColumnKey_(normalizeKey_(headers[columnIndex]))) {
+    if (!isAttendanceMatrixStatusColumn_(headers[columnIndex])) {
       continue;
     }
 
-    var date = resolveAttendanceMatrixDate_(values, headerRowIndex, columnIndex, fallbackDay, monthInfo, daysInMonth);
+    var date = resolveAttendanceMatrixDate_(values, displayValues, headerRowIndex, columnIndex, fallbackDay, monthInfo, daysInMonth);
     fallbackDay += 1;
     if (!date) {
       continue;
     }
 
-    var punctualityColumns = findAttendanceMatrixPunctualityColumns_(headers, values, headerRowIndex, columnIndex, date, monthInfo);
+    var punctualityColumns = findAttendanceMatrixPunctualityColumns_(headers, values, displayValues, headerRowIndex, columnIndex, date, monthInfo);
     columns.push({
       attendedColumn: columnIndex,
       under15Column: punctualityColumns.under15Column,
@@ -558,8 +694,8 @@ function getAttendanceMatrixColumns_(headers, values, headerRowIndex, sheetName)
   return columns;
 }
 
-function resolveAttendanceMatrixDate_(values, headerRowIndex, columnIndex, fallbackDay, monthInfo, daysInMonth) {
-  var explicitDate = findAttendanceMatrixDateHeader_(values, headerRowIndex, columnIndex, monthInfo);
+function resolveAttendanceMatrixDate_(values, displayValues, headerRowIndex, columnIndex, fallbackDay, monthInfo, daysInMonth) {
+  var explicitDate = findAttendanceMatrixDateHeader_(values, displayValues, headerRowIndex, columnIndex, monthInfo);
   if (explicitDate) {
     return explicitDate;
   }
@@ -571,7 +707,7 @@ function resolveAttendanceMatrixDate_(values, headerRowIndex, columnIndex, fallb
   return dateKey_(new Date(monthInfo.year, monthInfo.month, fallbackDay));
 }
 
-function findAttendanceMatrixDateHeader_(values, headerRowIndex, columnIndex, monthInfo) {
+function findAttendanceMatrixDateHeader_(values, displayValues, headerRowIndex, columnIndex, monthInfo) {
   for (var rowIndex = headerRowIndex - 1; rowIndex >= 0; rowIndex--) {
     var offsets = [0, -1, 1];
     for (var i = 0; i < offsets.length; i++) {
@@ -580,7 +716,8 @@ function findAttendanceMatrixDateHeader_(values, headerRowIndex, columnIndex, mo
         continue;
       }
 
-      var date = parseAttendanceMatrixDateValue_(values[rowIndex][candidateIndex], monthInfo);
+      var date = parseAttendanceMatrixDateValue_(values[rowIndex][candidateIndex], monthInfo) ||
+        parseAttendanceMatrixDateValue_(displayValues && displayValues[rowIndex] ? displayValues[rowIndex][candidateIndex] : '', monthInfo);
       if (date) {
         return date;
       }
@@ -621,14 +758,14 @@ function parseAttendanceMatrixDateValue_(value, monthInfo) {
   return '';
 }
 
-function findAttendanceMatrixPunctualityColumns_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo) {
+function findAttendanceMatrixPunctualityColumns_(headers, values, displayValues, headerRowIndex, attendedColumn, targetDate, monthInfo) {
   return {
-    under15Column: findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, isAttendanceUnder15Header_),
-    over15Column: findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, isAttendanceOver15Header_)
+    under15Column: findAttendanceMatrixPunctualityColumn_(headers, values, displayValues, headerRowIndex, attendedColumn, targetDate, monthInfo, isAttendanceUnder15Header_),
+    over15Column: findAttendanceMatrixPunctualityColumn_(headers, values, displayValues, headerRowIndex, attendedColumn, targetDate, monthInfo, isAttendanceOver15Header_)
   };
 }
 
-function findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, matcher) {
+function findAttendanceMatrixPunctualityColumn_(headers, values, displayValues, headerRowIndex, attendedColumn, targetDate, monthInfo, matcher) {
   for (var columnIndex = 0; columnIndex < headers.length; columnIndex++) {
     if (columnIndex === attendedColumn) {
       continue;
@@ -637,7 +774,7 @@ function findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex,
       continue;
     }
 
-    var candidateDate = findAttendanceMatrixDateHeader_(values, headerRowIndex, columnIndex, monthInfo);
+    var candidateDate = findAttendanceMatrixDateHeader_(values, displayValues, headerRowIndex, columnIndex, monthInfo);
     if (candidateDate && targetDate && String(candidateDate) === String(targetDate)) {
       return columnIndex;
     }
@@ -655,6 +792,35 @@ function findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex,
   }
 
   return -1;
+}
+
+function isAttendanceMatrixStatusColumn_(header) {
+  if (isAttendanceUnder15Header_(header) || isAttendanceOver15Header_(header) || isAttendanceMatrixOnTimeKey_(header)) {
+    return false;
+  }
+  return isAttendanceMatrixStatusColumnKey_(normalizeKey_(header));
+}
+
+function shouldPreferAttendanceDisplayColumn_(header) {
+  return isAttendanceTableStatusHeader_(header) ||
+    isAttendanceUnder15Header_(header) ||
+    isAttendanceOver15Header_(header) ||
+    isAttendanceMatrixOnTimeKey_(header);
+}
+
+function isAttendanceTableStatusHeader_(header) {
+  var key = normalizeKey_(header);
+  return key === 'status' ||
+    key === 'attendancestatus' ||
+    key === 'attendance';
+}
+
+function preferredAttendanceDisplayValue_(rawValue, displayValue) {
+  var displayText = String(displayValue || '').trim();
+  if (displayText) {
+    return displayText;
+  }
+  return rawValue;
 }
 
 function findAttendanceHeaderIndex_(headers, normalizedKeys) {
@@ -745,8 +911,10 @@ function buildAttendanceAgentNameMap_() {
   return output;
 }
 
-function getAttendanceMatrixStatus_(attendedValue, over15Value) {
-  var selectedStatus = normalizeAttendanceStatusValue_(attendedValue);
+function getAttendanceMatrixStatus_(statusDisplayValue, statusRawValue, over15Value) {
+  var selectedStatus = normalizeAttendanceStatusValue_(statusDisplayValue) ||
+    normalizeAttendanceStatusValue_(statusRawValue) ||
+    String(statusDisplayValue || statusRawValue || '').trim();
   if (shouldOverrideAttendanceStatusToLate_(selectedStatus, over15Value)) {
     return 'Late';
   }
@@ -754,7 +922,7 @@ function getAttendanceMatrixStatus_(attendedValue, over15Value) {
     return selectedStatus;
   }
 
-  var attended = attendanceMatrixCellState_(attendedValue);
+  var attended = attendanceMatrixCellState_(statusRawValue);
 
   if (attended === true) {
     return isOver15PunctualityValue_(over15Value) ? 'Late' : 'Attended';
@@ -849,19 +1017,22 @@ function normalizeAttendanceStatusValue_(value) {
   return '';
 }
 
-function attendanceRecordsFromValues_(values, headerRowIndex, headers, sheetName) {
+function attendanceRecordsFromValues_(values, displayValues, headerRowIndex, headers, sheetName) {
   var records = [];
 
   for (var rowIndex = headerRowIndex + 1; rowIndex < values.length; rowIndex++) {
     var row = values[rowIndex];
-    if (!rowHasValue_(row)) {
+    var displayRow = (displayValues && displayValues[rowIndex]) || [];
+    if (!rowHasValue_(row) && !rowHasValue_(displayRow)) {
       continue;
     }
 
     var record = {};
     for (var columnIndex = 0; columnIndex < headers.length; columnIndex++) {
       if (headers[columnIndex]) {
-        record[headers[columnIndex]] = row[columnIndex];
+        record[headers[columnIndex]] = shouldPreferAttendanceDisplayColumn_(headers[columnIndex])
+          ? preferredAttendanceDisplayValue_(row[columnIndex], displayRow[columnIndex])
+          : row[columnIndex];
       }
     }
     record._SourceSheet = sheetName;
@@ -1158,7 +1329,8 @@ function upsertAttendanceRawRowsForWindow_(rows, startDate, endDate) {
         agentEmail: normalizeEmail_(replacement[3]),
         previousRawStatus: existingRow[4] || '',
         sourceStatus: replacement[4] || '',
-        sourceDropdownStatus: extractAttendanceImportNoteValue_(replacement[9], 'Source status'),
+        sourceDropdownStatus: extractAttendanceImportNoteValue_(replacement[9], 'Source display status') ||
+          extractAttendanceImportNoteValue_(replacement[9], 'Source status'),
         under15Value: extractAttendanceImportNoteValue_(replacement[9], 'Under 15'),
         over15Value: extractAttendanceImportNoteValue_(replacement[9], 'Over 15'),
         finalRawStatus: replacement[4] || ''

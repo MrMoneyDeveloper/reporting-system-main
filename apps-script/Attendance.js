@@ -28,6 +28,23 @@ function repairRawAttendanceFromSource_(referenceDate) {
   var startDate = getHistoricalSourceStart_();
   var endDate = getOperationalDayWindow(reference).endDate;
   var result = syncAttendanceFromSourceDetailed_(startDate, endDate);
+  var currentWindow = getCurrentOpenOperationalDayWindow_(reference);
+
+  if (result.status === 'SUCCESS') {
+    if (typeof refreshAnalyticsForDateRange_ === 'function') {
+      result.analyticsRefresh = refreshAnalyticsForDateRange_(startDate, endDate, {
+        rebuildRollups: true,
+        log: true
+      });
+    }
+
+    var finalRows = buildFinalReportDataset('daily', currentWindow.startDate, currentWindow.endDate);
+    result.currentReportRows = finalRows.length;
+    if (typeof clearDashboardCache_ === 'function') {
+      clearDashboardCache_();
+    }
+    logAttendanceRepairDiagnostics_(result.statusChanges || []);
+  }
 
   logPipelineEvent_({
     reportType: 'Attendance Repair',
@@ -38,7 +55,10 @@ function repairRawAttendanceFromSource_(referenceDate) {
       ', filtered=' + result.filteredRows +
       ', active=' + result.activeRows +
       ', unmatched=' + result.unmatchedRows +
-      ', wrote=' + result.rowsWritten + '. ' + (result.message || ''),
+      ', removed=' + (result.rowsRemoved || 0) +
+      ', wrote=' + result.rowsWritten +
+      ', status changes=' + (result.statusChanges ? result.statusChanges.length : 0) +
+      ', current report rows=' + (result.currentReportRows || 0) + '. ' + (result.message || ''),
     rowsProcessed: result.rowsWritten || 0,
     startDate: startDate,
     endDate: endDate
@@ -55,7 +75,9 @@ function syncAttendanceFromSourceDetailed_(startDate, endDate) {
     filteredRows: 0,
     activeRows: 0,
     unmatchedRows: 0,
+    rowsRemoved: 0,
     rowsWritten: 0,
+    statusChanges: [],
     message: ''
   };
 
@@ -76,7 +98,14 @@ function syncAttendanceFromSourceDetailed_(startDate, endDate) {
     var mappedRows = mapAttendanceSourceRows_(sourceRows, startDate, endDate);
     var filteredRows = filterAttendanceRawRowsForWindow_(mappedRows, startDate, endDate);
     var activeResult = filterAttendanceRowsToActiveAgents_(filteredRows);
-    var uniqueRows = dedupeAttendanceRows_(activeResult.rows);
+    var upsertResult = {
+      rowsRemoved: 0,
+      rowsWritten: 0,
+      statusChanges: []
+    };
+    if (activeResult.rows.length > 0) {
+      upsertResult = upsertAttendanceRawRowsForWindow_(activeResult.rows, startDate, endDate);
+    }
 
     result.status = 'SUCCESS';
     result.sourceRows = sourceRows.length;
@@ -84,8 +113,12 @@ function syncAttendanceFromSourceDetailed_(startDate, endDate) {
     result.filteredRows = filteredRows.length;
     result.activeRows = activeResult.rows.length;
     result.unmatchedRows = activeResult.unmatchedRows;
-    result.rowsWritten = appendRows(SHEET_NAMES.RAW_ATTENDANCE, uniqueRows);
-    result.message = 'Attendance source sync completed.';
+    result.rowsRemoved = upsertResult.rowsRemoved;
+    result.rowsWritten = upsertResult.rowsWritten;
+    result.statusChanges = upsertResult.statusChanges;
+    result.message = activeResult.rows.length > 0
+      ? 'Attendance source sync completed with window upsert.'
+      : 'Attendance source sync completed with no active rows to upsert.';
     if (sourceRows.length > 0 && mappedRows.length > 0 && filteredRows.length === 0) {
       result.message += ' ' + buildAttendanceNoMatchDebugMessage_(sourceRows, mappedRows, startDate, endDate);
     }
@@ -1096,6 +1129,102 @@ function filterAttendanceRawRowsForWindow_(rows, startDate, endDate) {
   return output;
 }
 
+function upsertAttendanceRawRowsForWindow_(rows, startDate, endDate) {
+  var activeAgents = getAgentEmailMap();
+  var incoming = buildUniqueIncomingAttendanceRows_(rows);
+  var existingRows = getSheetData(SHEET_NAMES.RAW_ATTENDANCE);
+  var keptRows = [];
+  var rowsRemoved = 0;
+  var statusChanges = [];
+
+  for (var i = 0; i < existingRows.length; i++) {
+    var existingRow = attendanceRawObjectToRow_(existingRows[i]);
+    var existingEmail = normalizeEmail_(existingRow[3]);
+    if (!existingEmail || !activeAgents[existingEmail] || !isAttendanceRawRowInWindow_(existingRow, startDate, endDate)) {
+      keptRows.push(existingRow);
+      continue;
+    }
+
+    rowsRemoved += 1;
+    var key = attendanceIdentityKey_(existingRow);
+    var replacement = key ? incoming.byKey[key] : null;
+    if (replacement && String(existingRow[4] || '') !== String(replacement[4] || '')) {
+      statusChanges.push({
+        key: key,
+        date: dateKey_(replacement[0]),
+        shift: normalizeShift_(replacement[1]),
+        agentName: replacement[2] || existingRow[2] || '',
+        agentEmail: normalizeEmail_(replacement[3]),
+        previousRawStatus: existingRow[4] || '',
+        sourceStatus: replacement[4] || ''
+      });
+    }
+  }
+
+  var replacementRows = [];
+  for (var j = 0; j < incoming.keys.length; j++) {
+    replacementRows.push(incoming.byKey[incoming.keys[j]]);
+  }
+
+  clearAndWriteRows(
+    SHEET_NAMES.RAW_ATTENDANCE,
+    SHEET_HEADERS[SHEET_NAMES.RAW_ATTENDANCE],
+    keptRows.concat(replacementRows)
+  );
+
+  return {
+    rowsRemoved: rowsRemoved,
+    rowsWritten: replacementRows.length,
+    statusChanges: statusChanges
+  };
+}
+
+function buildUniqueIncomingAttendanceRows_(rows) {
+  var byKey = {};
+  var keys = [];
+
+  for (var i = 0; i < (rows || []).length; i++) {
+    var row = rows[i];
+    var key = attendanceIdentityKey_(row);
+    if (!key) {
+      continue;
+    }
+    if (!byKey[key]) {
+      keys.push(key);
+    }
+    byKey[key] = normalizeRowWidth_([row], SHEET_HEADERS[SHEET_NAMES.RAW_ATTENDANCE].length)[0];
+  }
+
+  return {
+    byKey: byKey,
+    keys: keys
+  };
+}
+
+function attendanceRawObjectToRow_(row) {
+  return [
+    row.Date,
+    row.Shift,
+    row['Agent Name'],
+    row.Email,
+    row.Status,
+    row['Scheduled Start'],
+    row['Scheduled End'],
+    row['Actual Start'],
+    row['Actual End'],
+    row.Notes
+  ];
+}
+
+function isAttendanceRawRowInWindow_(row, startDate, endDate) {
+  if (!row || !row[0]) {
+    return false;
+  }
+
+  var rowDate = dateOnly_(row[0]).getTime();
+  return rowDate >= dateOnly_(startDate).getTime() && rowDate < dateOnly_(endDate).getTime();
+}
+
 function dedupeAttendanceRows_(rows) {
   var existingRows = getSheetData(SHEET_NAMES.RAW_ATTENDANCE);
   var seen = {};
@@ -1118,10 +1247,92 @@ function dedupeAttendanceRows_(rows) {
 }
 
 function attendanceDedupeKey_(row) {
-  if (Array.isArray(row)) {
-    return [dateKey_(row[0]), normalizeShift_(row[1]), normalizeEmail_(row[3]), row[4]].join('|');
+  return attendanceIdentityKey_(row);
+}
+
+function attendanceIdentityKey_(row) {
+  var date = Array.isArray(row) ? row[0] : row.Date;
+  var shift = Array.isArray(row) ? row[1] : row.Shift;
+  var email = Array.isArray(row) ? row[3] : row.Email;
+  if (!date || !normalizeEmail_(email)) {
+    return '';
   }
-  return [dateKey_(row.Date), normalizeShift_(row.Shift), normalizeEmail_(row.Email), row.Status].join('|');
+  return [dateKey_(date), normalizeEmail_(email), normalizeShift_(shift)].join('|');
+}
+
+function logAttendanceRepairDiagnostics_(statusChanges) {
+  if (!statusChanges || statusChanges.length === 0) {
+    return;
+  }
+
+  var rawMap = buildAttendanceStatusMap_(getSheetData(SHEET_NAMES.RAW_ATTENDANCE), {
+    date: 'Date',
+    email: 'Email',
+    shift: 'Shift',
+    status: 'Status'
+  });
+  var normalizedMap = buildAttendanceStatusMap_(getSheetData(SHEET_NAMES.NORMALIZED_ATTENDANCE), {
+    date: 'Date',
+    email: 'Agent Email',
+    shift: 'Shift',
+    status: 'Attendance Status'
+  });
+  var finalMap = buildAttendanceStatusMap_(getSheetData(SHEET_NAMES.CURRENT_REPORT_VIEW), {
+    date: 'Period Start',
+    email: 'Agent Email',
+    shift: 'Shift',
+    status: 'Attendance Status'
+  });
+
+  var limit = Math.min(statusChanges.length, 25);
+  for (var i = 0; i < limit; i++) {
+    var change = statusChanges[i];
+    var rawStatus = rawMap[change.key] || '';
+    var normalizedStatus = normalizedMap[change.key] || '';
+    var finalStatus = finalMap[change.key] || '';
+    logPipelineEvent_({
+      reportType: 'Attendance Repair',
+      phase: 'attendance-diagnostic',
+      status: 'STATUS_CHANGED',
+      message: 'Attendance diagnostic for ' + (change.agentName || change.agentEmail) +
+        ' on ' + change.date +
+        ' shift=' + (change.shift || 'Unassigned') +
+        ': previous raw=' + safeAttendanceText_(change.previousRawStatus) +
+        ', source=' + safeAttendanceText_(change.sourceStatus) +
+        ', raw after sync=' + safeAttendanceText_(rawStatus) +
+        ', normalized=' + safeAttendanceText_(normalizedStatus) +
+        ', final report=' + safeAttendanceText_(finalStatus) + '.'
+    });
+  }
+
+  if (statusChanges.length > limit) {
+    logPipelineEvent_({
+      reportType: 'Attendance Repair',
+      phase: 'attendance-diagnostic',
+      status: 'TRUNCATED',
+      message: 'Logged first ' + limit + ' attendance status changes out of ' + statusChanges.length + '.'
+    });
+  }
+}
+
+function buildAttendanceStatusMap_(rows, fields) {
+  var output = {};
+  for (var i = 0; i < (rows || []).length; i++) {
+    var row = rows[i];
+    var key = attendanceStatusMapKey_(row[fields.date], row[fields.email], row[fields.shift]);
+    if (!key) {
+      continue;
+    }
+    output[key] = row[fields.status] || '';
+  }
+  return output;
+}
+
+function attendanceStatusMapKey_(date, email, shift) {
+  if (!date || !normalizeEmail_(email)) {
+    return '';
+  }
+  return [dateKey_(date), normalizeEmail_(email), normalizeShift_(shift)].join('|');
 }
 
 function pickAttendanceValue_(row, keys) {

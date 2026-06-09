@@ -44,7 +44,13 @@ var DEFAULT_AGENT_ROSTER = Object.freeze([
   { name: 'Alrique Usher', email: 'alrique.usher.digifycx@gmail.com', shift: 'Day', team: 'Zendesk' },
   { name: 'Nomfundo Mtiyane', email: 'nomfundo.mtiyane.digifycx@gmail.com', shift: 'Day', team: 'Zendesk' },
   { name: 'Sbahle Ngidi', email: 'sbahle.ngidi.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' },
-  { name: 'Nothando Shangase', email: 'nothando.shangase.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' }
+  { name: 'Sanelisiwe Mbele', email: 'sanelisiwe.mbele.digifycx@gmail.com', shift: '', team: '' },
+  { name: 'Siphiwe Sibisi', email: 'siphiwe.sibisi.digifycx@gmail.com', shift: '', team: '' },
+  { name: 'Nothando Shangase', email: 'nothando.shangase.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' },
+  { name: 'Atiyyah Sathar', email: 'atiyyah.sathar.digifycx@gmail.com', shift: '', team: '' },
+  { name: 'Nomonde Bhengu', email: 'nomonde.bhengu.digifycx@gmail.com', shift: '', team: '' },
+  { name: 'Nosipho Nkwanyana', email: 'nosipho.nkwanyana.digifycx@gmail.com', shift: '', team: '' },
+  { name: 'Gugu Xulu', email: 'gugu.xulu.digifycx@gmail.com', shift: '', team: '' }
 ]);
 var ACTIVE_AGENTS_CACHE_ = null;
 var AGENT_EMAIL_MAP_CACHE_ = null;

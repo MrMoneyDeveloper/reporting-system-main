@@ -156,6 +156,7 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
     var notes = buildFinalNotes_(attendance, tickets, inProgressTickets, openTicketNotes, commentedTickets);
     var usefulNotes = buildUsefulReportNotes_(notes, openTicketNotes);
     var ticketFollowUpStatus = inProgressTickets ? 'In progress' : ((ticketSolved || commentedTickets || ticketsCreated) ? 'Completed' : 'No productivity recorded');
+    var shift = agent.shift || firstPeriodValue_(attendance, 3) || firstPeriodValue_(tickets, 3) || '';
     var wfm = wfmMap[windowInfo.fiscalMonth + '|' + agent.email] || {};
     var wfmTotalHours = wfm['WFM Total Hours'] || '';
     var wfmOutstandingHours = wfm['Outstanding Hours'] || '';
@@ -172,7 +173,7 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
       windowInfo.fiscalMonth,
       agent.email,
       agent.name,
-      agent.shift,
+      shift,
       attendancePercent === '' ? '' : round2_(attendancePercent),
       ticketSolved,
       '',
@@ -358,6 +359,15 @@ function sumColumn_(rows, index) {
     total += Number(rows[i][index] || 0);
   }
   return total;
+}
+
+function firstPeriodValue_(rows, index) {
+  for (var i = 0; i < (rows || []).length; i++) {
+    if (rows[i][index] !== '' && rows[i][index] !== null && typeof rows[i][index] !== 'undefined') {
+      return rows[i][index];
+    }
+  }
+  return '';
 }
 
 function hasColumnValue_(rows, index) {

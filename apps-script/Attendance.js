@@ -492,8 +492,9 @@ function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
     for (var columnIndex = 0; columnIndex < matrixColumns.length; columnIndex++) {
       var column = matrixColumns[columnIndex];
       var attendedValue = row[column.attendedColumn];
-      var onTimeValue = column.onTimeColumn >= 0 ? row[column.onTimeColumn] : '';
-      var status = getAttendanceMatrixStatus_(attendedValue, onTimeValue, column.onTimeIsOver15);
+      var under15Value = column.under15Column >= 0 ? row[column.under15Column] : '';
+      var over15Value = column.over15Column >= 0 ? row[column.over15Column] : '';
+      var status = getAttendanceMatrixStatus_(attendedValue, over15Value);
 
       if (!status) {
         continue;
@@ -509,7 +510,7 @@ function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
         'Scheduled End': '',
         'Actual Start': '',
         'Actual End': '',
-        Notes: 'Imported from attendance matrix tab "' + sheetName + '".',
+        Notes: buildAttendanceMatrixImportNote_(sheetName, attendedValue, under15Value, over15Value, status),
         _SourceSheet: sheetName,
         _SourceRow: rowIndex + 1,
         _SourceColumn: column.attendedColumn + 1
@@ -518,6 +519,14 @@ function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
   }
 
   return records;
+}
+
+function buildAttendanceMatrixImportNote_(sheetName, statusValue, under15Value, over15Value, finalStatus) {
+  return 'Imported from attendance matrix tab "' + sheetName + '". ' +
+    'Source status=' + safeAttendanceText_(statusValue) +
+    '; Under 15=' + safeAttendanceText_(under15Value) +
+    '; Over 15=' + safeAttendanceText_(over15Value) +
+    '; Final status=' + safeAttendanceText_(finalStatus) + '.';
 }
 
 function getAttendanceMatrixColumns_(headers, values, headerRowIndex, sheetName) {
@@ -537,11 +546,11 @@ function getAttendanceMatrixColumns_(headers, values, headerRowIndex, sheetName)
       continue;
     }
 
-    var onTimeColumn = findAttendanceMatrixOnTimeColumn_(headers, values, headerRowIndex, columnIndex, date, monthInfo);
+    var punctualityColumns = findAttendanceMatrixPunctualityColumns_(headers, values, headerRowIndex, columnIndex, date, monthInfo);
     columns.push({
       attendedColumn: columnIndex,
-      onTimeColumn: onTimeColumn,
-      onTimeIsOver15: onTimeColumn >= 0 && isAttendanceOver15Header_(headers[onTimeColumn]),
+      under15Column: punctualityColumns.under15Column,
+      over15Column: punctualityColumns.over15Column,
       date: date
     });
   }
@@ -612,47 +621,36 @@ function parseAttendanceMatrixDateValue_(value, monthInfo) {
   return '';
 }
 
-function findAttendanceMatrixOnTimeColumn_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo) {
-  var sameDateOver15Column = findAttendanceMatrixPunctualityColumnByDate_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, true);
-  if (sameDateOver15Column >= 0) {
-    return sameDateOver15Column;
-  }
-
-  var sameDateOnTimeColumn = findAttendanceMatrixPunctualityColumnByDate_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, false);
-  if (sameDateOnTimeColumn >= 0) {
-    return sameDateOnTimeColumn;
-  }
-
-  var offsets = [-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6];
-  var nearbyOnTimeColumn = -1;
-  for (var i = 0; i < offsets.length; i++) {
-    var nearbyColumn = attendedColumn + offsets[i];
-    if (nearbyColumn < 0 || nearbyColumn >= headers.length) {
-      continue;
-    }
-    if (isAttendanceOver15Header_(headers[nearbyColumn])) {
-      return nearbyColumn;
-    }
-    if (nearbyOnTimeColumn < 0 && isAttendanceMatrixOnTimeKey_(headers[nearbyColumn])) {
-      nearbyOnTimeColumn = nearbyColumn;
-    }
-  }
-
-  return nearbyOnTimeColumn;
+function findAttendanceMatrixPunctualityColumns_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo) {
+  return {
+    under15Column: findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, isAttendanceUnder15Header_),
+    over15Column: findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, isAttendanceOver15Header_)
+  };
 }
 
-function findAttendanceMatrixPunctualityColumnByDate_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, over15Only) {
+function findAttendanceMatrixPunctualityColumn_(headers, values, headerRowIndex, attendedColumn, targetDate, monthInfo, matcher) {
   for (var columnIndex = 0; columnIndex < headers.length; columnIndex++) {
     if (columnIndex === attendedColumn) {
       continue;
     }
-    if (over15Only ? !isAttendanceOver15Header_(headers[columnIndex]) : !isAttendanceMatrixOnTimeKey_(headers[columnIndex])) {
+    if (!matcher(headers[columnIndex])) {
       continue;
     }
 
     var candidateDate = findAttendanceMatrixDateHeader_(values, headerRowIndex, columnIndex, monthInfo);
     if (candidateDate && targetDate && String(candidateDate) === String(targetDate)) {
       return columnIndex;
+    }
+  }
+
+  var offsets = [-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6];
+  for (var i = 0; i < offsets.length; i++) {
+    var nearbyColumn = attendedColumn + offsets[i];
+    if (nearbyColumn < 0 || nearbyColumn >= headers.length) {
+      continue;
+    }
+    if (matcher(headers[nearbyColumn])) {
+      return nearbyColumn;
     }
   }
 
@@ -691,8 +689,21 @@ function isAttendanceMatrixOnTimeKey_(header) {
   var key = normalizeKey_(header);
   return key === 'ontime' ||
     key === 'ontimeyes' ||
-    key === 'timeous' ||
-    isAttendanceOver15Header_(header);
+    key === 'timeous';
+}
+
+function isAttendanceUnder15Header_(header) {
+  var text = String(header || '').trim().toLowerCase();
+  var key = normalizeKey_(header);
+  if ((text.indexOf('<') !== -1 || text.indexOf('under') !== -1 || text.indexOf('less') !== -1) && text.indexOf('15') !== -1) {
+    return true;
+  }
+  return key === 'under15mins' ||
+    key === 'under15minutes' ||
+    key === 'lessthan15mins' ||
+    key === 'lessthan15minutes' ||
+    key === 'below15mins' ||
+    key === 'below15minutes';
 }
 
 function isAttendanceOver15Header_(header) {
@@ -734,9 +745,9 @@ function buildAttendanceAgentNameMap_() {
   return output;
 }
 
-function getAttendanceMatrixStatus_(attendedValue, onTimeValue, onTimeIsOver15) {
+function getAttendanceMatrixStatus_(attendedValue, over15Value) {
   var selectedStatus = normalizeAttendanceStatusValue_(attendedValue);
-  if (onTimeIsOver15 && shouldOverrideAttendanceStatusToLate_(selectedStatus, onTimeValue)) {
+  if (shouldOverrideAttendanceStatusToLate_(selectedStatus, over15Value)) {
     return 'Late';
   }
   if (selectedStatus) {
@@ -744,21 +755,17 @@ function getAttendanceMatrixStatus_(attendedValue, onTimeValue, onTimeIsOver15) 
   }
 
   var attended = attendanceMatrixCellState_(attendedValue);
-  var onTime = attendanceMatrixCellState_(onTimeValue);
-
-  if (attended === null && onTime === null) {
-    return '';
-  }
 
   if (attended === true) {
-    if (onTimeIsOver15) {
-      return onTime === true ? 'Late' : 'Present';
-    }
-    return onTime === false ? 'Late' : 'Present';
+    return isOver15PunctualityValue_(over15Value) ? 'Late' : 'Attended';
   }
 
   if (attended === false) {
-    return 'Absent';
+    return isOver15PunctualityValue_(over15Value) ? 'Late' : 'Absent';
+  }
+
+  if (isOver15PunctualityValue_(over15Value)) {
+    return 'Late';
   }
 
   return '';
@@ -975,17 +982,11 @@ function shouldOverrideAttendanceStatusToLate_(status, over15Value) {
   }
 
   var normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'sick' ||
-      normalized === 'study leave' ||
-      normalized === 'family leave' ||
-      normalized === 'family responsibility' ||
-      normalized === 'holiday' ||
-      normalized === 'not scheduled' ||
-      normalized === 'awol') {
-    return false;
-  }
-
-  return true;
+  return normalized === '' ||
+    normalized === 'attended' ||
+    normalized === 'present' ||
+    normalized === 'absent' ||
+    normalized === 'late';
 }
 
 function isOver15PunctualityValue_(value) {
@@ -1156,7 +1157,11 @@ function upsertAttendanceRawRowsForWindow_(rows, startDate, endDate) {
         agentName: replacement[2] || existingRow[2] || '',
         agentEmail: normalizeEmail_(replacement[3]),
         previousRawStatus: existingRow[4] || '',
-        sourceStatus: replacement[4] || ''
+        sourceStatus: replacement[4] || '',
+        sourceDropdownStatus: extractAttendanceImportNoteValue_(replacement[9], 'Source status'),
+        under15Value: extractAttendanceImportNoteValue_(replacement[9], 'Under 15'),
+        over15Value: extractAttendanceImportNoteValue_(replacement[9], 'Over 15'),
+        finalRawStatus: replacement[4] || ''
       });
     }
   }
@@ -1260,6 +1265,13 @@ function attendanceIdentityKey_(row) {
   return [dateKey_(date), normalizeEmail_(email), normalizeShift_(shift)].join('|');
 }
 
+function extractAttendanceImportNoteValue_(note, label) {
+  var text = String(note || '');
+  var pattern = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;\\.]+)');
+  var match = text.match(pattern);
+  return match ? String(match[1] || '').trim() : '';
+}
+
 function logAttendanceRepairDiagnostics_(statusChanges) {
   if (!statusChanges || statusChanges.length === 0) {
     return;
@@ -1298,7 +1310,10 @@ function logAttendanceRepairDiagnostics_(statusChanges) {
         ' on ' + change.date +
         ' shift=' + (change.shift || 'Unassigned') +
         ': previous raw=' + safeAttendanceText_(change.previousRawStatus) +
-        ', source=' + safeAttendanceText_(change.sourceStatus) +
+        ', source dropdown=' + safeAttendanceText_(change.sourceDropdownStatus || change.sourceStatus) +
+        ', under 15=' + safeAttendanceText_(change.under15Value) +
+        ', over 15=' + safeAttendanceText_(change.over15Value) +
+        ', final raw written=' + safeAttendanceText_(change.finalRawStatus || change.sourceStatus) +
         ', raw after sync=' + safeAttendanceText_(rawStatus) +
         ', normalized=' + safeAttendanceText_(normalizedStatus) +
         ', final report=' + safeAttendanceText_(finalStatus) + '.'

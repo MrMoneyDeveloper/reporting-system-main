@@ -44,13 +44,13 @@ var DEFAULT_AGENT_ROSTER = Object.freeze([
   { name: 'Alrique Usher', email: 'alrique.usher.digifycx@gmail.com', shift: 'Day', team: 'Zendesk' },
   { name: 'Nomfundo Mtiyane', email: 'nomfundo.mtiyane.digifycx@gmail.com', shift: 'Day', team: 'Zendesk' },
   { name: 'Sbahle Ngidi', email: 'sbahle.ngidi.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' },
-  { name: 'Sanelisiwe Mbele', email: 'sanelisiwe.mbele.digifycx@gmail.com', shift: '', team: '' },
-  { name: 'Siphiwe Sibisi', email: 'siphiwe.sibisi.digifycx@gmail.com', shift: '', team: '' },
+  { name: 'Sanelisiwe Mbele', email: 'sanelisiwe.mbele.digifycx@gmail.com', shift: 'Mid', team: '' },
+  { name: 'Siphiwe Sibisi', email: 'siphiwe.sibisi.digifycx@gmail.com', shift: 'Night', team: '' },
   { name: 'Nothando Shangase', email: 'nothando.shangase.digifycx@gmail.com', shift: 'Mid', team: 'Zendesk' },
-  { name: 'Atiyyah Sathar', email: 'atiyyah.sathar.digifycx@gmail.com', shift: '', team: '' },
-  { name: 'Nomonde Bhengu', email: 'nomonde.bhengu.digifycx@gmail.com', shift: '', team: '' },
-  { name: 'Nosipho Nkwanyana', email: 'nosipho.nkwanyana.digifycx@gmail.com', shift: '', team: '' },
-  { name: 'Gugu Xulu', email: 'gugu.xulu.digifycx@gmail.com', shift: '', team: '' }
+  { name: 'Atiyyah Sathar', email: 'atiyyah.sathar.digifycx@gmail.com', shift: 'Night', team: '' },
+  { name: 'Nomonde Bhengu', email: 'nomonde.bhengu.digifycx@gmail.com', shift: 'Night', team: '' },
+  { name: 'Nosipho Nkwanyana', email: 'nosipho.nkwanyana.digifycx@gmail.com', shift: 'Night', team: '' },
+  { name: 'Gugu Xulu', email: 'gugu.xulu.digifycx@gmail.com', shift: 'Day', team: '' }
 ]);
 var ACTIVE_AGENTS_CACHE_ = null;
 var AGENT_EMAIL_MAP_CACHE_ = null;
@@ -132,7 +132,7 @@ function seedDefaultAgents_() {
     }
 
     rowsToAppend.push([
-      'FALSE',
+      'TRUE',
       nameFromEmail_(fallbackEmail),
       fallbackEmail,
       '',
@@ -192,7 +192,9 @@ function syncDefaultAgentRoster_() {
       updates += setAgentRosterCell_(row, indexes.Shift, rosterMap[email].shift);
       updates += setAgentRosterCell_(row, indexes.Role, row[indexes.Role] || 'Agent');
     } else if (defaultEmailMap[email]) {
-      updates += setAgentRosterCell_(row, indexes.Active, 'FALSE');
+      updates += setAgentRosterCell_(row, indexes.Active, 'TRUE');
+      updates += setAgentRosterCell_(row, indexes['Agent Name'], row[indexes['Agent Name']] || nameFromEmail_(email));
+      updates += setAgentRosterCell_(row, indexes.Role, row[indexes.Role] || 'Agent');
     }
   }
 

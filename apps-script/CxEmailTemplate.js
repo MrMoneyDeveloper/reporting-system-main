@@ -624,25 +624,59 @@ function CX_groupRowsByShift_(rows) {
 function CX_buildAttendanceEmailRows_(rows) {
   var output = [];
   for (var i = 0; i < rows.length; i++) {
-    var notes = String(rows[i][13] || '');
     var attendanceValue = rows[i][8];
+    var attendanceStatus = CX_attendanceStatusForReview_(rows[i][17], attendanceValue);
     var hasAttendance = !(attendanceValue === '' || attendanceValue === null || typeof attendanceValue === 'undefined');
     var attendanceNumber = hasAttendance ? Number(attendanceValue) : '';
-    var isMissing = !hasAttendance || /missing attendance/i.test(notes);
+    var isMissing = !hasAttendance || !attendanceStatus;
     var isBelowExpected = hasAttendance && !isNaN(attendanceNumber) && attendanceNumber < 1;
-    var hasAttendanceNote = /attendance|late|absent|awol/i.test(notes);
+    var shouldShow = isMissing || isBelowExpected || CX_isAttendanceReviewStatus_(attendanceStatus);
 
-    if (isMissing || isBelowExpected || hasAttendanceNote) {
+    if (shouldShow) {
+      var status = attendanceStatus || 'Missing attendance';
       output.push({
         name: rows[i][6] || '',
-        details: 'Attendance score: ' + CX_formatPercent_(attendanceValue) + '. Shift: ' + (rows[i][7] || 'Unassigned') + '. Status: ' + CX_valueOrDash_(rows[i][17]) + '.',
-        status: isMissing || attendanceNumber === 0 ? 'No productivity recorded' : 'In progress',
-        tasksCompleted: isMissing ? 0 : CX_formatPercent_(attendanceValue),
-        notes: rows[i][20] || notes || 'Attendance below expected.'
+        details: 'Shift: ' + (rows[i][7] || 'Unassigned') + '. Status: ' + status + '.',
+        status: status,
+        tasksCompleted: '',
+        notes: ''
       });
     }
   }
   return output;
+}
+
+function CX_attendanceStatusForReview_(status, attendanceValue) {
+  var text = String(status || '').trim();
+  if (text) {
+    return text;
+  }
+  if (attendanceValue === '' || attendanceValue === null || typeof attendanceValue === 'undefined') {
+    return '';
+  }
+  if (Number(attendanceValue) === 1) {
+    return 'Attended';
+  }
+  if (Number(attendanceValue) === 0) {
+    return 'Absent';
+  }
+  return 'Late';
+}
+
+function CX_isAttendanceReviewStatus_(status) {
+  var value = String(status || '').toLowerCase();
+  return Boolean(
+    value.indexOf('late') !== -1 ||
+    value.indexOf('sick') !== -1 ||
+    value.indexOf('awol') !== -1 ||
+    value.indexOf('absent') !== -1 ||
+    value.indexOf('study leave') !== -1 ||
+    value.indexOf('family leave') !== -1 ||
+    value.indexOf('family responsibility') !== -1 ||
+    value.indexOf('holiday') !== -1 ||
+    value.indexOf('not scheduled') !== -1 ||
+    value.indexOf('missing attendance') !== -1
+  );
 }
 
 function CX_buildWfmEmailRows_(rows, reportType) {

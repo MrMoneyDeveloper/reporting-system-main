@@ -675,6 +675,12 @@ function getWfmBalanceAttendanceStatusMap_() {
     var status = String(parts[i] || '').trim().toLowerCase();
     if (status) {
       map[status] = true;
+      if (status === 'present') {
+        map.attended = true;
+      }
+      if (status === 'attended') {
+        map.present = true;
+      }
     }
   }
 

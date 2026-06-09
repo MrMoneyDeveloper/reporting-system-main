@@ -384,10 +384,10 @@ function buildAttendanceRows(rows) {
   return sortByShift(rows).filter((row) => isAttendanceException(row)).map((row) => [
     row.shift || 'Unassigned',
     row.agentName || '',
-    `Status: ${row.attendanceStatus || 'Missing'}; expected hours: ${formatNumber(row.expectedHours)}`,
-    formatPercent(row.attendancePercent === '' ? null : Number(row.attendancePercent) * 100),
-    row.attendancePercent === '' ? 'Missing data' : 'Reviewed',
-    row.notes || ''
+    `Status: ${getAttendanceReviewStatus(row)}`,
+    '',
+    getAttendanceReviewStatus(row),
+    ''
   ]);
 }
 
@@ -415,10 +415,25 @@ function buildRiskRows(rows) {
 
 function isAttendanceException(row) {
   const status = String(row.attendanceStatus || '').toLowerCase();
-  const notes = String(row.notes || '').toLowerCase();
+  if (row.attendancePercent === '' || !status) return true;
   if (row.attendancePercent === '' || status.includes('missing')) return true;
-  if (status.includes('late') || status.includes('absent') || status.includes('awol') || status.includes('partial')) return true;
-  return notes.includes('attendance') && !notes.includes('no attendance exception');
+  if (status.includes('late') ||
+      status.includes('absent') ||
+      status.includes('awol') ||
+      status.includes('sick') ||
+      status.includes('study leave') ||
+      status.includes('family leave') ||
+      status.includes('family responsibility') ||
+      status.includes('holiday') ||
+      status.includes('not scheduled') ||
+      status.includes('partial')) return true;
+  return false;
+}
+
+function getAttendanceReviewStatus(row) {
+  const status = String(row.attendanceStatus || '').trim();
+  if (status) return status;
+  return 'Missing attendance';
 }
 
 function getTicketFollowUpStatus(row) {

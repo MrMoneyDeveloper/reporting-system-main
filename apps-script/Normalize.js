@@ -152,7 +152,7 @@ function joinFinalRows_(reportType, windowInfo, attendanceRows, ticketRows, wfmR
     var commentedTickets = sumColumn_(tickets, 16);
     var inProgressTickets = sumColumn_(tickets, 14);
     var openTicketNotes = uniqueMetricValues_(tickets, 15).join('; ');
-    var attendanceStatus = uniqueMetricValues_(attendance, 6).join(', ');
+    var attendanceStatus = summarizeMetricStatuses_(attendance, 6);
     var notes = buildFinalNotes_(attendance, tickets, inProgressTickets, openTicketNotes, commentedTickets);
     var usefulNotes = buildUsefulReportNotes_(notes, openTicketNotes);
     var ticketFollowUpStatus = inProgressTickets ? 'In progress' : ((ticketSolved || commentedTickets || ticketsCreated) ? 'Completed' : 'No productivity recorded');

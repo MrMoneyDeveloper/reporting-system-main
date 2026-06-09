@@ -407,7 +407,7 @@ function safeAttendanceText_(value) {
 function isAttendanceMatrixHeader_(headers) {
   var hasAgentName = false;
   var hasShift = false;
-  var attendedCount = 0;
+  var attendanceColumnCount = 0;
 
   for (var i = 0; i < (headers || []).length; i++) {
     var key = normalizeKey_(headers[i]);
@@ -417,12 +417,12 @@ function isAttendanceMatrixHeader_(headers) {
     if (key === 'shift') {
       hasShift = true;
     }
-    if (isAttendanceMatrixAttendedKey_(key)) {
-      attendedCount += 1;
+    if (isAttendanceMatrixStatusColumnKey_(key)) {
+      attendanceColumnCount += 1;
     }
   }
 
-  return hasAgentName && hasShift && attendedCount >= 2;
+  return hasAgentName && hasShift && attendanceColumnCount >= 2;
 }
 
 function attendanceMatrixRecordsFromValues_(values, headerInfo, sheetName) {
@@ -494,7 +494,7 @@ function getAttendanceMatrixColumns_(headers, values, headerRowIndex, sheetName)
   var daysInMonth = monthInfo ? new Date(monthInfo.year, monthInfo.month + 1, 0).getDate() : 31;
 
   for (var columnIndex = 0; columnIndex < headers.length; columnIndex++) {
-    if (!isAttendanceMatrixAttendedKey_(normalizeKey_(headers[columnIndex]))) {
+    if (!isAttendanceMatrixStatusColumnKey_(normalizeKey_(headers[columnIndex]))) {
       continue;
     }
 
@@ -606,6 +606,15 @@ function isAttendanceMatrixAttendedKey_(key) {
   return key === 'attended' || key === 'attendedyes' || key === 'present';
 }
 
+function isAttendanceMatrixStatusColumnKey_(key) {
+  return isAttendanceMatrixAttendedKey_(key) ||
+    key === 'status' ||
+    key === 'attendancestatus' ||
+    key === 'attendance' ||
+    /^([1-9]|[12]\d|3[01])(st|nd|rd|th)?$/.test(key) ||
+    /^20\d{6}$/.test(key);
+}
+
 function isAttendanceMatrixOnTimeKey_(key) {
   return key === 'ontime' || key === 'ontimeyes' || key === 'timeous';
 }
@@ -626,6 +635,11 @@ function buildAttendanceAgentNameMap_() {
 }
 
 function getAttendanceMatrixStatus_(attendedValue, onTimeValue) {
+  var selectedStatus = normalizeAttendanceStatusValue_(attendedValue);
+  if (selectedStatus) {
+    return selectedStatus;
+  }
+
   var attended = attendanceMatrixCellState_(attendedValue);
   var onTime = attendanceMatrixCellState_(onTimeValue);
 
@@ -671,6 +685,55 @@ function attendanceMatrixCellState_(value) {
   }
 
   return null;
+}
+
+function normalizeAttendanceStatusValue_(value) {
+  if (value === null || typeof value === 'undefined' || value === '') {
+    return '';
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'Attended' : 'Absent';
+  }
+
+  var text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  var key = normalizeKey_(text);
+  if (key === 'true' || key === 'yes' || key === 'y' || key === '1' || key === 'present' || key === 'attended') {
+    return 'Attended';
+  }
+  if (key === 'late') {
+    return 'Late';
+  }
+  if (key === 'sick') {
+    return 'Sick';
+  }
+  if (key === 'awol') {
+    return 'AWOL';
+  }
+  if (key === 'familyleave') {
+    return 'Family Leave';
+  }
+  if (key === 'familyresponsibility' || key === 'familyresponsibilityleave') {
+    return 'Family Responsibility';
+  }
+  if (key === 'studyleave') {
+    return 'Study Leave';
+  }
+  if (key === 'holiday') {
+    return 'Holiday';
+  }
+  if (key === 'notscheduled') {
+    return 'Not Scheduled';
+  }
+  if (key === 'false' || key === 'no' || key === 'n' || key === '0' || key === 'absent' || key === 'x') {
+    return 'Absent';
+  }
+
+  return '';
 }
 
 function attendanceRecordsFromValues_(values, headerRowIndex, headers, sheetName) {
@@ -735,6 +798,9 @@ function scoreAttendanceHeaderRow_(headers) {
       score += 1;
     }
     if (key === 'status' || key === 'attendancestatus' || key === 'attendance') {
+      score += 1;
+    }
+    if (/^([1-9]|[12]\d|3[01])(st|nd|rd|th)?$/.test(key)) {
       score += 1;
     }
     if (key === 'shift') {
@@ -950,7 +1016,7 @@ function normalizeAttendance(rows) {
 
     var attendanceDate = dateOnly_(row.Date);
     var fiscalInfo = getFiscalInfo(attendanceDate);
-    var status = String(row.Status || '').trim();
+    var status = normalizeAttendanceStatusValue_(row.Status) || String(row.Status || '').trim();
     var expectedHours = calculateExpectedHours_(attendanceDate, row['Scheduled Start'], row['Scheduled End'], row.Shift);
     var actualHours = calculateActualHours_(attendanceDate, row['Actual Start'], row['Actual End']);
     var lateMinutes = calculateLateMinutes_(attendanceDate, row['Scheduled Start'], row['Actual Start']);
@@ -978,16 +1044,21 @@ function getAttendanceScore_(status, notes) {
   var normalizedStatus = String(status || '').trim().toLowerCase();
   var normalizedNotes = String(notes || '').trim().toLowerCase();
 
-  if (normalizedStatus === 'present') {
+  if (normalizedStatus === 'present' || normalizedStatus === 'attended') {
     return 1;
   }
   if (normalizedStatus === 'late') {
     return 0.75;
   }
-  if (normalizedStatus === 'sick with notice' || (normalizedStatus === 'sick' && normalizedNotes.indexOf('notice') !== -1)) {
-    return 0.75;
-  }
-  if (normalizedStatus === 'leave approved' || (normalizedStatus === 'leave' && normalizedNotes.indexOf('approved') !== -1)) {
+  if (normalizedStatus === 'sick' ||
+      normalizedStatus === 'study leave' ||
+      normalizedStatus === 'family leave' ||
+      normalizedStatus === 'family responsibility' ||
+      normalizedStatus === 'holiday' ||
+      normalizedStatus === 'not scheduled' ||
+      normalizedStatus === 'sick with notice' ||
+      normalizedStatus === 'leave approved' ||
+      (normalizedStatus === 'leave' && normalizedNotes.indexOf('approved') !== -1)) {
     return null;
   }
   if (normalizedStatus === 'absent' || normalizedStatus === 'awol') {

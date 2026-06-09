@@ -302,7 +302,7 @@ function buildDailyAgentMetricRowsForDay_(operationalDate) {
     var attendance = collectMetricRowsForAgent_(attendanceRows, agent.email, agent.shift, dateKey_(day));
     var tickets = collectMetricRowsForAgent_(ticketRows, agent.email, agent.shift, dateKey_(day));
     var shift = agent.shift || firstMetricValue_(attendance, 3) || firstMetricValue_(tickets, 3) || '';
-    var attendanceStatus = uniqueMetricValues_(attendance, 6).join(', ');
+    var attendanceStatus = summarizeMetricStatuses_(attendance, 6);
     var attendanceScore = averageMetricColumn_(attendance, 10);
     var expectedHours = sumMetricColumn_(attendance, 7);
     var actualHours = sumMetricColumn_(attendance, 8);
@@ -623,6 +623,32 @@ function uniqueMetricValues_(rows, index) {
     output.push(value);
   }
   return output;
+}
+
+function summarizeMetricStatuses_(rows, index) {
+  var counts = {};
+  var order = [];
+  for (var i = 0; i < (rows || []).length; i++) {
+    var value = String(rows[i][index] || '').trim();
+    if (!value) {
+      continue;
+    }
+    if (!counts[value]) {
+      counts[value] = 0;
+      order.push(value);
+    }
+    counts[value] += 1;
+  }
+
+  if (!order.length) {
+    return '';
+  }
+  if (order.length === 1 && counts[order[0]] === 1) {
+    return order[0];
+  }
+  return order.map(function (status) {
+    return status + ': ' + counts[status];
+  }).join('; ');
 }
 
 function sumMetricColumn_(rows, index) {

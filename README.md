@@ -1,5 +1,12 @@
 # BMRX Productivity Reporting Engine
 
+## Technical handover and dependencies
+
+- [Technical handover](HANDOVER.md): ownership, setup, credential rotation, verification and recovery.
+- [Dependency and API/OAuth configuration list](DEPENDENCIES.md): runtime, external services and configuration inventory.
+
+**Handover requirement:** all API/OAuth credentials and related shared/deployment secrets in use must be rotated or reissued, configured and tested under the receiving owner. Completion must be recorded; these documentation changes do not rotate live credentials.
+
 ## 1. Project Purpose
 
 This repository is the local source of truth for a Google Sheets and Apps Script reporting system that pulls Zendesk ticket data, WFM productivity data, and manually maintained attendance data into one reporting workbook.
